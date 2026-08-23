@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
@@ -232,12 +233,28 @@ class MetaTftClient:
         last_error: Exception | None = None
         for attempt in range(self.retry_count + 1):
             self._wait_for_rate_limit()
-            request = Request(url, headers={"User-Agent": "tft-ai-player/0.1"})
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/json, text/plain, */*",
+            }
+            request = Request(url, headers=headers)
             try:
                 with urlopen(request, timeout=self.timeout_seconds) as response:
                     payload = json.loads(response.read().decode("utf-8"))
                 return _require_mapping(payload, url)
-            except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as error:
+            except (
+                HTTPError,
+                URLError,
+                TimeoutError,
+                ConnectionError,
+                OSError,
+                http.client.HTTPException,
+                json.JSONDecodeError,
+            ) as error:
                 last_error = error
                 if attempt == self.retry_count:
                     break

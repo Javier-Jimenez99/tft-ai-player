@@ -113,6 +113,31 @@ def test_tracked_timeline_candidates_treat_missing_app_matches_as_untracked() ->
     assert MetaTftClient.tracked_timeline_candidates(profile, tft_set="TFTSet17") == []
 
 
+def test_get_json_retries_and_wraps_connection_reset_error(monkeypatch) -> None:
+    from unittest.mock import MagicMock
+    import pytest
+    from tft_ai_player.metatft import MetaTftRequestError
+
+    attempts = 0
+
+    def mock_urlopen(request, timeout):
+        nonlocal attempts
+        attempts += 1
+        mock_resp = MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.__exit__.return_value = None
+        mock_resp.read.side_effect = ConnectionResetError(10054, "Connection reset by peer")
+        return mock_resp
+
+    monkeypatch.setattr("tft_ai_player.metatft.client.urlopen", mock_urlopen)
+
+    client = MetaTftClient(minimum_request_interval_seconds=0, retry_count=2)
+    with pytest.raises(MetaTftRequestError, match="Connection reset by peer"):
+        client._get_json("https://example.com/test.json")
+
+    assert attempts == 3
+
+
 def _match(match_id: str, tft_set: str, match_data_url: str | None) -> dict[str, object]:
     return {
         "riot_match_id": match_id,
