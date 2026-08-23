@@ -1,0 +1,156 @@
+from __future__ import annotations
+
+import csv
+import json
+from argparse import Namespace
+from pathlib import Path
+
+from tft_ai_player import cli
+from tft_ai_player.metatft import LeaderboardPlayer, TrackedTimelineCandidate
+
+
+def test_collect_writes_one_csv_for_each_player_game(tmp_path: Path, monkeypatch) -> None:
+    players = [_player("Alpha"), _player("Bravo")]
+    candidates = {
+        "Alpha": [_candidate("alpha-game")],
+        "Bravo": [_candidate("bravo-game")],
+    }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def fetch_leaderboard_players(self, **_: int) -> list[LeaderboardPlayer]:
+            return players
+
+        def fetch_profile(self, *, game_name: str, **_: str) -> dict[str, str]:
+            return {"game_name": game_name}
+
+        def tracked_timeline_candidates(
+            self,
+            profile: dict[str, str],
+            **_: str,
+        ) -> list[TrackedTimelineCandidate]:
+            return candidates[profile["game_name"]]
+
+        def fetch_timeline(self, _: str) -> dict[str, object]:
+            return _timeline()
+
+    monkeypatch.setattr(cli, "MetaTftClient", FakeClient)
+    args = Namespace(
+        players=2,
+        games_per_player=1,
+        max_games=2,
+        leaderboard_offset=0,
+        tft_set="TFTSet17",
+        output=tmp_path,
+    )
+
+    assert cli._collect_leaderboard(args) == 0
+
+    paths = sorted((tmp_path / "players").glob("*.csv"))
+    assert [path.name for path in paths] == ["la2_Alpha_LAS.csv", "la2_Bravo_LAS.csv"]
+    with paths[0].open(newline="", encoding="utf-8") as input_file:
+        row = next(csv.DictReader(input_file))
+    assert row["collected_from_riot_id"] == "Alpha#LAS"
+    assert row["match_id"] == "alpha-game"
+
+
+def test_collect_skips_already_downloaded_games_on_resume(tmp_path: Path, monkeypatch) -> None:
+    players = [_player("Alpha"), _player("Bravo")]
+    candidates = {
+        "Alpha": [_candidate("alpha-game")],
+        "Bravo": [_candidate("bravo-game")],
+    }
+    fetch_timeline_calls: list[str] = []
+
+    # Pre-create la2_Alpha_LAS.csv on disk with alpha-game
+    players_dir = tmp_path / "players"
+    players_dir.mkdir(parents=True, exist_ok=True)
+    with (players_dir / "la2_Alpha_LAS.csv").open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["match_id", "round_stage"])
+        writer.writeheader()
+        writer.writerow({"match_id": "alpha-game", "round_stage": "2-2"})
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def fetch_leaderboard_players(self, **_: int) -> list[LeaderboardPlayer]:
+            return players
+
+        def fetch_profile(self, *, game_name: str, **_: str) -> dict[str, str]:
+            return {"game_name": game_name}
+
+        def tracked_timeline_candidates(
+            self,
+            profile: dict[str, str],
+            **_: str,
+        ) -> list[TrackedTimelineCandidate]:
+            return candidates[profile["game_name"]]
+
+        def fetch_timeline(self, url: str) -> dict[str, object]:
+            fetch_timeline_calls.append(url)
+            return _timeline()
+
+    monkeypatch.setattr(cli, "MetaTftClient", FakeClient)
+    args = Namespace(
+        players=2,
+        games_per_player=1,
+        max_games=2,
+        leaderboard_offset=0,
+        tft_set="TFTSet17",
+        output=tmp_path,
+    )
+
+    assert cli._collect_leaderboard(args) == 0
+
+    # Only bravo-game timeline should have been fetched
+    assert fetch_timeline_calls == ["https://matches3.metatft.com/bravo-game.json"]
+    paths = sorted(players_dir.glob("*.csv"))
+    assert [path.name for path in paths] == ["la2_Alpha_LAS.csv", "la2_Bravo_LAS.csv"]
+
+
+def _player(game_name: str) -> LeaderboardPlayer:
+    return LeaderboardPlayer(region="la2", game_name=game_name, tag_line="LAS", player_id=None)
+
+
+def _candidate(game_id: str) -> TrackedTimelineCandidate:
+    return TrackedTimelineCandidate(
+        app_match_uuid=game_id,
+        match_id_ow=f"{game_id}-internal",
+        timeline_url=f"https://matches3.metatft.com/{game_id}.json",
+        tft_set="TFTSet17",
+        game_version="16.16",
+        riot_match_id=None,
+        created_timestamp=None,
+        player_id=None,
+    )
+
+
+def _timeline() -> dict[str, object]:
+    return {
+        "summoner_name": "Focal",
+        "stage_data": json.dumps(
+            [
+                {
+                    "me": {"summoner_name": "Focal", "gold": 20, "xp": {"level": 4}},
+                    "round_start_health": {
+                        "player_status": {
+                            "Focal": {"health": 90},
+                            "Opponent": {"health": 88},
+                        }
+                    },
+                    "match_info": {
+                        "round_type": {"stage": "2-2", "name": "PVP", "type": "PVP"},
+                        "opponent": {"name": "Opponent"},
+                        "round_outcome": {"Focal": {"outcome": "victory"}},
+                    },
+                    "matchup_boards": {
+                        "player_board": [{"unit": "TFT17_Aatrox"}],
+                        "opponent_board": [{"unit": "TFT17_Veigar"}],
+                    },
+                }
+            ]
+        ),
+    }

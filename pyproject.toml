@@ -1,0 +1,24 @@
+[project]
+name = "tft-ai-player"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "javier-jimenezdelajara-int_nestle", email = "Javier.JimenezdelaJara@nestle.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "tqdm>=4.67",
+]
+
+[project.scripts]
+tft-ai-player = "tft_ai_player.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.3,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
