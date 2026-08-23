@@ -60,6 +60,27 @@ def test_writer_skips_games_without_valid_pvp_rounds(tmp_path) -> None:
     assert not (tmp_path / "players").exists()
 
 
+def test_writer_blacklist_management(tmp_path) -> None:
+    writer = PlayerCsvWriter(tmp_path)
+    assert writer.load_blacklist() == set()
+    assert not writer.is_blacklisted("game-1")
+
+    writer.add_to_blacklist("game-1", reason="no valid PVP rounds")
+    writer.add_to_blacklist("game-2", reason="validation error")
+    writer.add_to_blacklist("game-1", reason="duplicate attempt")
+
+    assert writer.is_blacklisted("game-1")
+    assert writer.is_blacklisted("game-2")
+    assert not writer.is_blacklisted("game-3")
+    assert writer.load_blacklist() == {"game-1", "game-2"}
+
+    # Verify file content
+    content = writer.blacklist_path().read_text(encoding="utf-8")
+    assert "game-1\t# no valid PVP rounds" in content
+    assert "game-2\t# validation error" in content
+    assert content.count("game-1") == 1
+
+
 def _observation(stage: str, match_id: str = "game-uuid") -> RoundObservation:
     return RoundObservation(
         match_id=match_id,

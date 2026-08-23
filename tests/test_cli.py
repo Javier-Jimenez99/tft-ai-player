@@ -111,6 +111,107 @@ def test_collect_skips_already_downloaded_games_on_resume(tmp_path: Path, monkey
     assert [path.name for path in paths] == ["la2_Alpha_LAS.csv", "la2_Bravo_LAS.csv"]
 
 
+def test_collect_blacklists_empty_games_and_skips_on_resume(tmp_path: Path, monkeypatch) -> None:
+    players = [_player("Alpha")]
+    candidates = {"Alpha": [_candidate("empty-game"), _candidate("valid-game")]}
+    fetch_timeline_calls: list[str] = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def fetch_leaderboard_players(self, **_: int) -> list[LeaderboardPlayer]:
+            return players
+
+        def fetch_profile(self, *, game_name: str, **_: str) -> dict[str, str]:
+            return {"game_name": game_name}
+
+        def tracked_timeline_candidates(
+            self,
+            profile: dict[str, str],
+            **_: str,
+        ) -> list[TrackedTimelineCandidate]:
+            return candidates[profile["game_name"]]
+
+        def fetch_timeline(self, url: str) -> dict[str, object]:
+            fetch_timeline_calls.append(url)
+            if "empty-game" in url:
+                # Stage data with no PVP rounds
+                return {
+                    "summoner_name": "Focal",
+                    "stage_data": json.dumps([
+                        {
+                            "me": {"summoner_name": "Focal"},
+                            "match_info": {"round_type": {"stage": "1-2", "name": "Minions", "type": "PVE"}},
+                        }
+                    ]),
+                }
+            return _timeline()
+
+    monkeypatch.setattr(cli, "MetaTftClient", FakeClient)
+    args = Namespace(
+        players=1,
+        games_per_player=2,
+        max_games=2,
+        leaderboard_offset=0,
+        tft_set="TFTSet17",
+        output=tmp_path,
+    )
+
+    # First run: downloads empty-game (blacklists it) and valid-game
+    assert cli._collect_leaderboard(args) == 0
+    blacklist_path = tmp_path / "blacklisted_games.txt"
+    assert blacklist_path.exists()
+    assert "empty-game" in blacklist_path.read_text(encoding="utf-8")
+
+    # Second run: empty-game should be skipped without fetching
+    fetch_timeline_calls.clear()
+    assert cli._collect_leaderboard(args) == 0
+    assert "https://matches3.metatft.com/empty-game.json" not in fetch_timeline_calls
+
+
+def test_collect_does_not_blacklist_on_connection_error(tmp_path: Path, monkeypatch) -> None:
+    from tft_ai_player.metatft import MetaTftRequestError
+
+    players = [_player("Alpha")]
+    candidates = {"Alpha": [_candidate("network-fail-game")]}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def fetch_leaderboard_players(self, **_: int) -> list[LeaderboardPlayer]:
+            return players
+
+        def fetch_profile(self, *, game_name: str, **_: str) -> dict[str, str]:
+            return {"game_name": game_name}
+
+        def tracked_timeline_candidates(
+            self,
+            profile: dict[str, str],
+            **_: str,
+        ) -> list[TrackedTimelineCandidate]:
+            return candidates[profile["game_name"]]
+
+        def fetch_timeline(self, url: str) -> dict[str, object]:
+            raise MetaTftRequestError("connection reset by peer")
+
+    monkeypatch.setattr(cli, "MetaTftClient", FakeClient)
+    args = Namespace(
+        players=1,
+        games_per_player=1,
+        max_games=1,
+        leaderboard_offset=0,
+        tft_set="TFTSet17",
+        output=tmp_path,
+    )
+
+    assert cli._collect_leaderboard(args) == 0
+    blacklist_path = tmp_path / "blacklisted_games.txt"
+    if blacklist_path.exists():
+        assert "network-fail-game" not in blacklist_path.read_text(encoding="utf-8")
+
+
 def _player(game_name: str) -> LeaderboardPlayer:
     return LeaderboardPlayer(region="la2", game_name=game_name, tag_line="LAS", player_id=None)
 

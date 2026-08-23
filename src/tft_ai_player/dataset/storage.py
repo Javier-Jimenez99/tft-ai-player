@@ -40,6 +40,57 @@ class PlayerCsvWriter:
             return set()
         return match_ids
 
+    def blacklist_path(self) -> Path:
+        """Return the destination path for the blacklist file."""
+
+        return self.root / "blacklisted_games.txt"
+
+    def load_blacklist(self) -> set[str]:
+        """Return set of match IDs recorded in the blacklist."""
+
+        blacklisted: set[str] = set()
+        for filename in ("blacklisted_games.txt", "blacklist.txt"):
+            path = self.root / filename
+            if not path.exists():
+                continue
+            try:
+                with path.open("r", encoding="utf-8") as file:
+                    for line in file:
+                        stripped = line.strip()
+                        if not stripped or stripped.startswith("#"):
+                            continue
+                        match_id = stripped.split()[0].strip()
+                        if match_id:
+                            blacklisted.add(match_id)
+            except Exception:
+                continue
+        return blacklisted
+
+    def add_to_blacklist(self, match_id: str, reason: str | None = None) -> None:
+        """Add a match ID to the persistent blacklist if not already present."""
+
+        cleaned_match_id = match_id.strip()
+        if not cleaned_match_id:
+            return
+
+        if cleaned_match_id in self.load_blacklist():
+            return
+
+        path = self.blacklist_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        entry = (
+            f"{cleaned_match_id}\t# {reason}\n"
+            if reason
+            else f"{cleaned_match_id}\n"
+        )
+        with path.open("a", encoding="utf-8") as file:
+            file.write(entry)
+
+    def is_blacklisted(self, match_id: str) -> bool:
+        """Check if a match ID is currently blacklisted."""
+
+        return match_id.strip() in self.load_blacklist()
+
     def all_existing_match_ids(self) -> set[str]:
         """Return set of all match IDs across all player CSV files in data/players/."""
 

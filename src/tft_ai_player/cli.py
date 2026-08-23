@@ -236,6 +236,7 @@ def _collect_timeline(args: argparse.Namespace) -> int:
         minimum_request_interval_seconds=getattr(args, "request_interval", 1.5),
         retry_count=5,
     )
+    writer = PlayerCsvWriter(args.output)
     timeline = client.fetch_timeline(args.timeline_url)
     observations = extract_pvp_rounds(
         timeline,
@@ -243,9 +244,10 @@ def _collect_timeline(args: argparse.Namespace) -> int:
         tft_set=args.tft_set,
         game_version=args.game_version,
     )
-    path = PlayerCsvWriter(args.output).write_game(observations)
+    path = writer.write_game(observations)
     if path is None:
-        print("no valid PVP observations found; no CSV written")
+        writer.add_to_blacklist(args.match_id, reason="no valid PVP rounds")
+        print("no valid PVP observations found; match blacklisted and no CSV written", file=sys.stderr)
         return 0
     print(f"wrote {len(observations)} PVP observations to {path}")
     return 0
@@ -277,9 +279,15 @@ def _download_player_games(
             skipped += 1
             continue
 
-        seen_game_ids.add(game_id)
         try:
             timeline = client.fetch_timeline(candidate.timeline_url)
+        except MetaTftRequestError as error:
+            # Temporary connection or HTTP request error: do NOT blacklist to allow retry in future runs.
+            tqdm.write(f"skipped game {game_id} from {player.riot_id} (temporary request error): {error}", file=sys.stderr)
+            seen_game_ids.add(game_id)
+            continue
+
+        try:
             observations = extract_pvp_rounds(
                 timeline,
                 match_id=game_id,
@@ -290,8 +298,10 @@ def _download_player_games(
                 avg_match_rating=candidate.avg_match_rating,
                 avg_match_rating_numeric=candidate.avg_match_rating_numeric,
             )
-        except (MetaTftRequestError, TimelineValidationError, ValueError) as error:
-            tqdm.write(f"skipped game {game_id} from {player.riot_id}: {error}", file=sys.stderr)
+        except (TimelineValidationError, ValueError) as error:
+            writer.add_to_blacklist(game_id, reason=f"validation error: {error}")
+            seen_game_ids.add(game_id)
+            tqdm.write(f"blacklisted game {game_id} from {player.riot_id} (validation error): {error}", file=sys.stderr)
             continue
 
         path = writer.write_player_game(
@@ -301,9 +311,12 @@ def _download_player_games(
             match_id_ow=candidate.match_id_ow,
         )
         if path is None:
-            tqdm.write(f"skipped game {game_id} from {player.riot_id}: no valid PVP rounds")
+            writer.add_to_blacklist(game_id, reason="no valid PVP rounds")
+            seen_game_ids.add(game_id)
+            tqdm.write(f"blacklisted game {game_id} from {player.riot_id}: no valid PVP rounds")
             continue
 
+        seen_game_ids.add(game_id)
         written += 1
 
     return written, skipped
@@ -330,4 +343,5 @@ def _existing_game_ids(root: Path) -> set[str]:
     if games_dir.exists():
         seen.update(path.stem for path in games_dir.glob("*.csv"))
 
+    seen.update(PlayerCsvWriter(root).load_blacklist())
     return seen
