@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -20,6 +21,7 @@ class MatchCandidate:
     focal_rating_numeric: int | None = None
     avg_match_rating: str | None = None
     avg_match_rating_numeric: int | None = None
+    focal_augments: Sequence[str] = ()
 
     @classmethod
     def from_profile_record(cls, record: dict[str, Any]) -> MatchCandidate | None:
@@ -40,6 +42,13 @@ class MatchCandidate:
         avg_match_rating = _optional_text(record.get("avg_rating")) or _optional_text(summary_dict.get("avg_rating"))
         avg_match_rating_numeric = _optional_int(record.get("avg_rating_numeric")) or _optional_int(summary_dict.get("avg_rating_numeric"))
 
+        augments_raw = summary_dict.get("augments") or record.get("augments")
+        focal_augments: list[str] = []
+        if isinstance(augments_raw, Sequence) and not isinstance(augments_raw, (str, bytes)):
+            for aug in augments_raw:
+                if isinstance(aug, str) and aug.strip():
+                    focal_augments.append(aug.strip())
+
         return cls(
             riot_match_id=match_id,
             tft_set=tft_set,
@@ -51,6 +60,7 @@ class MatchCandidate:
             focal_rating_numeric=focal_rating_numeric,
             avg_match_rating=avg_match_rating,
             avg_match_rating_numeric=avg_match_rating_numeric,
+            focal_augments=tuple(focal_augments),
         )
 
 
@@ -110,6 +120,7 @@ class TrackedTimelineCandidate:
     avg_match_rating: str | None = None
     avg_match_rating_numeric: int | None = None
     queue_id: int | None = None
+    focal_augments: Sequence[str] = ()
 
     @classmethod
     def from_app_match_record(
@@ -141,6 +152,7 @@ class TrackedTimelineCandidate:
             avg_match_rating=profile_match.avg_match_rating if profile_match else None,
             avg_match_rating_numeric=profile_match.avg_match_rating_numeric if profile_match else None,
             queue_id=profile_match.queue_id if profile_match else None,
+            focal_augments=profile_match.focal_augments if profile_match else (),
         )
 
 

@@ -175,6 +175,40 @@ def test_parse_stage_data_rejects_a_non_array_payload() -> None:
         parse_stage_data({"stage_data": "{}"})
 
 
+def test_extract_pvp_rounds_focal_augments_progressive_unlock() -> None:
+    timeline = {
+        "summoner_name": "Focal",
+        "stage_data": json.dumps(
+            [
+                _snapshot_empty_augments(stage="2-2", round_name="PVP", outcome="victory"),
+                _snapshot_empty_augments(stage="3-5", round_name="PVP", outcome="defeat"),
+                _snapshot_empty_augments(stage="5-1", round_name="PVP", outcome="victory"),
+            ]
+        ),
+    }
+
+    observations = extract_pvp_rounds(
+        timeline,
+        match_id="MATCH_AUG",
+        tft_set="TFTSet18",
+        game_version="18.1",
+        focal_augments=["TFT18_Aug_1", "TFT18_Aug_2", "TFT18_Aug_3"],
+    )
+
+    assert len(observations) == 3
+    # Stage 2-2 should have 1st augment unlocked
+    assert observations[0].round_stage == "2-2"
+    assert observations[0].focal_augments == ["TFT18_Aug_1"]
+
+    # Stage 3-5 should have 1st and 2nd augments unlocked
+    assert observations[1].round_stage == "3-5"
+    assert observations[1].focal_augments == ["TFT18_Aug_1", "TFT18_Aug_2"]
+
+    # Stage 5-1 should have all 3 augments unlocked
+    assert observations[2].round_stage == "5-1"
+    assert observations[2].focal_augments == ["TFT18_Aug_1", "TFT18_Aug_2", "TFT18_Aug_3"]
+
+
 def _snapshot(*, stage: str, round_name: str, outcome: str) -> dict[str, object]:
     return {
         "me": {"summoner_name": "Focal", "gold": "20", "xp": {"level": 4}},
@@ -197,3 +231,9 @@ def _snapshot(*, stage: str, round_name: str, outcome: str) -> dict[str, object]
         },
         "winrate_info": {"model_data": {"prediction": 0.9}},
     }
+
+
+def _snapshot_empty_augments(*, stage: str, round_name: str, outcome: str) -> dict[str, object]:
+    snap = _snapshot(stage=stage, round_name=round_name, outcome=outcome)
+    snap["augments"] = {}
+    return snap

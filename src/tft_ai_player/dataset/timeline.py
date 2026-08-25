@@ -45,6 +45,7 @@ def extract_pvp_rounds(
     focal_rating_numeric: int | None = None,
     avg_match_rating: str | None = None,
     avg_match_rating_numeric: int | None = None,
+    focal_augments: Sequence[str] | None = None,
 ) -> list[RoundObservation]:
     """Extract valid PVP rounds without copying post-combat data into features."""
 
@@ -98,7 +99,22 @@ def extract_pvp_rounds(
         opponent_health = _int(opponent_status.get("health"))
         opponent_level = _int(opponent_status.get("xp"))
 
-        focal_augments = _extract_augments(snapshot, snapshot_focal_player, is_focal=True)
+        extracted_focal_augments = _extract_augments(snapshot, snapshot_focal_player, is_focal=True)
+        if not extracted_focal_augments and focal_augments:
+            stage_tuple = _parse_stage_tuple(stage)
+            if stage_tuple is not None:
+                if stage_tuple < (2, 1):
+                    active_count = 0
+                elif stage_tuple < (3, 2):
+                    active_count = 1
+                elif stage_tuple < (4, 2):
+                    active_count = 2
+                else:
+                    active_count = 3
+                extracted_focal_augments = list(focal_augments[:active_count])
+            else:
+                extracted_focal_augments = list(focal_augments)
+
         opponent_augments = _extract_augments(snapshot, opponent, is_focal=False)
 
         observations.append(
@@ -120,7 +136,7 @@ def extract_pvp_rounds(
                 focal_health=focal_health,
                 focal_level=focal_level,
                 focal_gold=focal_gold,
-                focal_augments=focal_augments,
+                focal_augments=extracted_focal_augments,
                 opponent=opponent,
                 opponent_health=opponent_health,
                 opponent_level=opponent_level,
@@ -135,6 +151,18 @@ def extract_pvp_rounds(
         )
 
     return observations
+
+
+def _parse_stage_tuple(stage: str | None) -> tuple[int, int] | None:
+    if not stage or not isinstance(stage, str):
+        return None
+    parts = stage.strip().split("-")
+    if len(parts) == 2:
+        try:
+            return int(parts[0]), int(parts[1])
+        except ValueError:
+            return None
+    return None
 
 
 def _format_datetime(value: object) -> str | None:

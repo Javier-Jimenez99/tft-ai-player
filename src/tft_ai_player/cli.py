@@ -321,6 +321,7 @@ def _download_player_games(
                 focal_rating_numeric=candidate.focal_rating_numeric,
                 avg_match_rating=candidate.avg_match_rating,
                 avg_match_rating_numeric=candidate.avg_match_rating_numeric,
+                focal_augments=candidate.focal_augments,
             )
         except (TimelineValidationError, ValueError) as error:
             writer.add_to_blacklist(game_id, reason=f"validation error: {error}")

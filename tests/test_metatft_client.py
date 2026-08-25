@@ -233,13 +233,39 @@ def test_get_json_retries_with_retry_after_on_429(monkeypatch) -> None:
     assert slept_durations == [12.5]
 
 
+def test_tracked_timeline_candidates_preserves_focal_augments() -> None:
+    profile = {
+        "matches": [
+            _match(
+                "MATCH_WITH_AUGS",
+                "TFTSet18",
+                "https://matches3.metatft.com/MATCH_WITH_AUGS.json",
+                augments=["TFT18_Aug_A", "TFT18_Aug_B", "TFT18_Aug_C"],
+            )
+        ],
+        "app_matches": [
+            {
+                "uuid": "timeline-aug-uuid",
+                "match_id_ow": "ow-123",
+                "match_data_url": "https://matches3.metatft.com/timeline-aug-uuid.json",
+                "created_timestamp": 1_700_000_000_000,
+            }
+        ],
+    }
+
+    candidates = MetaTftClient.tracked_timeline_candidates(profile, tft_set="TFTSet18")
+    assert len(candidates) == 1
+    assert candidates[0].focal_augments == ("TFT18_Aug_A", "TFT18_Aug_B", "TFT18_Aug_C")
+
+
 def _match(
     match_id: str,
     tft_set: str,
     match_data_url: str | None,
     queue_id: int = 1100,
+    augments: list[str] | None = None,
 ) -> dict[str, object]:
-    return {
+    result: dict[str, object] = {
         "riot_match_id": match_id,
         "tft_set": tft_set,
         "patch": "16.16",
@@ -247,6 +273,9 @@ def _match(
         "match_timestamp": 1_700_000_000_000,
         "queue_id": queue_id,
     }
+    if augments is not None:
+        result["summary"] = {"augments": augments}
+    return result
 
 
 def _leaderboard_player(riot_id: str, region: str, *, app_matches: bool) -> dict[str, object]:
