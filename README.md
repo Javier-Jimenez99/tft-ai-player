@@ -31,6 +31,7 @@ uv run tft-ai-player collect --players 1000 --tft-set TFTSet17
 - `--request-interval`: Minimum seconds between network calls to prevent rate-limiting (default: `1.5`).
 - `--games-per-player`: (Optional) Limit games per player. Defaults to unlimited (all Set 17 games available for each player).
 - `--max-games`: (Optional) Total game cap across all players.
+- `--allowed-queues`: (Optional) List of Riot queue IDs to retain (default: `1100` for Ranked TFT classification; excludes Double Up `1160`, Normals `1090`, etc.).
 - `--leaderboard-offset`: (Optional) Start from a different offset in the leaderboard roster.
 
 ## Collect From One Player

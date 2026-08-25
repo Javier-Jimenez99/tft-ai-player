@@ -109,6 +109,7 @@ class TrackedTimelineCandidate:
     focal_rating_numeric: int | None = None
     avg_match_rating: str | None = None
     avg_match_rating_numeric: int | None = None
+    queue_id: int | None = None
 
     @classmethod
     def from_app_match_record(
@@ -139,6 +140,7 @@ class TrackedTimelineCandidate:
             focal_rating_numeric=profile_match.focal_rating_numeric if profile_match else None,
             avg_match_rating=profile_match.avg_match_rating if profile_match else None,
             avg_match_rating_numeric=profile_match.avg_match_rating_numeric if profile_match else None,
+            queue_id=profile_match.queue_id if profile_match else None,
         )
 
 

@@ -62,6 +62,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default=1.5,
         help="minimum seconds between API requests (default: 1.5)",
     )
+    profile_parser.add_argument(
+        "--allowed-queues",
+        type=int,
+        nargs="+",
+        default=[1100],
+        help="Riot queue IDs to retain (default: [1100] for Ranked TFT)",
+    )
 
     collect_parser = subcommands.add_parser(
         "collect",
@@ -100,6 +107,13 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=1.5,
         help="minimum seconds between API requests (default: 1.5)",
+    )
+    collect_parser.add_argument(
+        "--allowed-queues",
+        type=int,
+        nargs="+",
+        default=[1100],
+        help="Riot queue IDs to retain (default: [1100] for Ranked TFT)",
     )
 
     timeline_parser = subcommands.add_parser(
@@ -147,7 +161,12 @@ def _collect_profile(args: argparse.Namespace) -> int:
         tag_line=player.tag_line,
         tft_set=args.tft_set,
     )
-    candidates = client.tracked_timeline_candidates(profile, tft_set=args.tft_set)
+    allowed_queues = getattr(args, "allowed_queues", (1100,))
+    candidates = client.tracked_timeline_candidates(
+        profile,
+        tft_set=args.tft_set,
+        allowed_queue_ids=allowed_queues,
+    )
     seen_game_ids = _existing_game_ids(args.output)
     written, skipped = _download_player_games(
         client=client,
@@ -178,6 +197,7 @@ def _collect_leaderboard(args: argparse.Namespace) -> int:
     writer = PlayerCsvWriter(args.output)
     players = client.fetch_leaderboard_players(count=args.players, offset=args.leaderboard_offset)
     seen_game_ids = _existing_game_ids(args.output)
+    allowed_queues = getattr(args, "allowed_queues", (1100,))
 
     total_written = 0
     total_skipped = 0
@@ -199,7 +219,11 @@ def _collect_leaderboard(args: argparse.Namespace) -> int:
                     tag_line=player.tag_line,
                     tft_set=args.tft_set,
                 )
-                candidates = client.tracked_timeline_candidates(profile, tft_set=args.tft_set)
+                candidates = client.tracked_timeline_candidates(
+                    profile,
+                    tft_set=args.tft_set,
+                    allowed_queue_ids=allowed_queues,
+                )
             except MetaTftRequestError as error:
                 tqdm.write(f"skipped player {player.riot_id}: {error}", file=sys.stderr)
                 continue

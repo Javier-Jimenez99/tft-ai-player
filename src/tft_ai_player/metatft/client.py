@@ -189,9 +189,15 @@ class MetaTftClient:
         profile: Mapping[str, Any],
         *,
         tft_set: str,
+        allowed_queue_ids: Sequence[int] | None = (1100,),
         max_timestamp_delta_ms: int = 3600 * 1000,
     ) -> list[TrackedTimelineCandidate]:
-        """Return app-recorded matches joined with Riot match metadata by timestamp."""
+        """Return app-recorded matches joined with Riot match metadata by timestamp.
+
+        By default, only standard Ranked TFT matches (queue_id=1100) are returned,
+        filtering out Double Up (1160), Normal (1090), and other modes. Pass
+        `allowed_queue_ids=None` to keep all queues.
+        """
 
         raw_app_matches = profile.get("app_matches")
         if raw_app_matches is None:
@@ -216,6 +222,10 @@ class MetaTftClient:
                             best_match = match
                 if best_diff > max_timestamp_delta_ms:
                     best_match = None
+
+            if allowed_queue_ids is not None:
+                if best_match is None or best_match.queue_id not in allowed_queue_ids:
+                    continue
 
             candidate = TrackedTimelineCandidate.from_app_match_record(
                 record,
@@ -259,9 +269,26 @@ class MetaTftClient:
                 if attempt == self.retry_count:
                     break
                 if isinstance(error, HTTPError) and error.code == 429:
-                    time.sleep(max(3.0, 2 ** (attempt + 1)))
+                    retry_after_hdr = (
+                        error.headers.get("Retry-After")
+                        if hasattr(error, "headers") and error.headers
+                        else None
+                    )
+                    retry_after_val: float | None = None
+                    if retry_after_hdr:
+                        try:
+                            retry_after_val = float(retry_after_hdr)
+                        except (ValueError, TypeError):
+                            pass
+                    if retry_after_val is not None and retry_after_val > 0:
+                        sleep_seconds = retry_after_val
+                    else:
+                        sleep_seconds = min(60.0, 5.0 * (2**attempt))
                 else:
-                    time.sleep(2**attempt)
+                    sleep_seconds = min(30.0, 2.0 * (2**attempt))
+
+                time.sleep(sleep_seconds)
+                self._last_request_at = time.monotonic()
 
         raise MetaTftRequestError(f"request failed for {url}: {last_error}") from last_error
 
