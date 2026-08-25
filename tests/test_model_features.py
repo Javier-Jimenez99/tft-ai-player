@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tft_ai_player.models.features import TFTBoardFeatureExtractor
-from tft_ai_player.models.metrics import (
+from tft_ai_player.round_winner import (
+    TFTBoardFeatureExtractor,
     compute_brier_metrics,
     compute_calibration_table,
     compute_classification_metrics,

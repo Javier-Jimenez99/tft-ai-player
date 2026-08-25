@@ -26,6 +26,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _collect_leaderboard(args)
         if args.command == "timeline":
             return _collect_timeline(args)
+        if args.command == "train-round-winner":
+            from .round_winner.train import main as train_main
+            return train_main()
     except (MetaTftRequestError, TimelineValidationError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -138,6 +141,29 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=1.5,
         help="minimum seconds between API requests (default: 1.5)",
+    )
+
+    train_parser = subcommands.add_parser(
+        "train-round-winner",
+        help="train and serialize the round winner probability model",
+    )
+    train_parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path(r"D:\tft-winner-data\players"),
+        help="path to directory containing player round CSV files",
+    )
+    train_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("models/round_winner"),
+        help="directory where model bundle and metadata will be saved",
+    )
+    train_parser.add_argument(
+        "--test-size",
+        type=float,
+        default=0.20,
+        help="proportion of matches held out for testing",
     )
 
     return parser
