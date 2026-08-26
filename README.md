@@ -119,13 +119,39 @@ cd tft-ai-player
 uv sync
 ```
 
-### 1. Collect Competitive Match Data
+### 1. Run TFT Match Simulation & Interactive Visual Dashboard 🎮
+
+Run a full 8-player TFT match simulation with authentic economy, PvE loot rounds, stage-aware carousel drafts, cascading star-ups, and item recipes:
+
+```powershell
+# Run Set 17 simulation (default) and generate interactive HTML dashboard
+uv run tft-ai-player simulate --set 17 --seed 42
+
+# Run Set 18 simulation ("Enchanted Wilds")
+uv run tft-ai-player simulate --set 18 --seed 123
+
+# Alternatively run directly via the example script
+uv run python examples/run_visual_simulation.py --set 18 --seed 42 --open-browser
+```
+
+#### Simulation Options:
+* `--set`, `-s`: Select TFT set (`17`, `18`, `TFTSet17`, `TFTSet18`). Default: `TFTSet17`.
+* `--seed`: RNG seed for reproducible game matches (e.g. `--seed 42`).
+* `--output-dir`, `-o`: Directory to save replay files (default: `dashboards/`).
+* `--output-path`: Custom file destination for the generated HTML.
+* `--open-browser`: Automatically open the generated interactive dashboard in your browser.
+
+The generated interactive replay dashboard (saved to `dashboards/tft_simulation_<set>_seed_<seed>.html`) allows you to scrub through every stage and inspect real-time board layouts, items, player HP, gold economy, streaks, and combat outcomes for all 8 players.
+
+---
+
+### 2. Collect Competitive Match Data
 ```powershell
 # Collect from top leaderboard players
 uv run tft-ai-player collect --players 100 --tft-set TFTSet17 --output data/players
 ```
 
-### 2. Train and Serialize the Round Winner Model
+### 3. Train and Serialize the Round Winner Model
 ```powershell
 # Fast training (~15 seconds) and save model artifacts
 uv run python -m tft_ai_player.round_winner.train `
@@ -133,7 +159,7 @@ uv run python -m tft_ai_player.round_winner.train `
     --output-dir "D:\tft-winner-data\models"
 ```
 
-### 3. Run Inference with Python
+### 4. Run Inference with Python
 ```python
 from tft_ai_player.round_winner import RoundWinnerPredictor
 
@@ -156,7 +182,7 @@ print(f"Predicted Win Probability: {win_probability * 100:.1f}%")
 # Output: Predicted Win Probability: 91.4%
 ```
 
-### 4. Run Tests
+### 5. Run Tests
 ```powershell
 uv run pytest tests/
 ```

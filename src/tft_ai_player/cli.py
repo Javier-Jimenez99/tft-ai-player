@@ -29,6 +29,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "train-round-winner":
             from .round_winner.train import main as train_main
             return train_main()
+        if args.command == "simulate":
+            return _run_simulation(args)
     except (MetaTftRequestError, TimelineValidationError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -164,6 +166,48 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.20,
         help="proportion of matches held out for testing",
+    )
+
+    simulate_parser = subcommands.add_parser(
+        "simulate",
+        help="run a full TFT simulation and export an interactive visual dashboard",
+    )
+    simulate_parser.add_argument(
+        "--set",
+        "-s",
+        type=str,
+        default="TFTSet17",
+        help="TFT set to simulate (e.g. '17', '18', 'TFTSet17', 'TFTSet18'). Default: 'TFTSet17'.",
+    )
+    simulate_parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="random seed for match generation (default: 42)",
+    )
+    simulate_parser.add_argument(
+        "--output-path",
+        type=str,
+        default=None,
+        help="custom destination path for the HTML dashboard file",
+    )
+    simulate_parser.add_argument(
+        "--output-dir",
+        "-o",
+        type=str,
+        default="dashboards",
+        help="output directory when output-path is omitted (default: dashboards)",
+    )
+    simulate_parser.add_argument(
+        "--max-rounds",
+        type=int,
+        default=60,
+        help="maximum number of rounds to simulate before stopping (default: 60)",
+    )
+    simulate_parser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="automatically open the exported dashboard in the default browser",
     )
 
     return parser
@@ -396,3 +440,70 @@ def _existing_game_ids(root: Path) -> set[str]:
 
     seen.update(PlayerCsvWriter(root).load_blacklist())
     return seen
+
+
+def _run_simulation(args: argparse.Namespace) -> int:
+    """Execute a simulated TFT match and export the interactive visual replay HTML dashboard."""
+    from .simulation import StandardTempoBot, TFTGame, get_set_data
+    from .simulation.visualizer import GameRecorder, generate_visual_html
+
+    set_data = get_set_data(args.set)
+    set_slug = set_data.set_name.lower()
+    seed = args.seed
+
+    print("\n" + "=" * 70)
+    print(f" [TFT VISUAL SIMULATION] Running match ({set_data.set_name}, seed={seed}) and recording visual replay...")
+    print("=" * 70)
+
+    game = TFTGame(set_data=set_data, seed=seed)
+    recorder = GameRecorder(game)
+    recorder.capture_snapshot(event_type="GAME_START")
+
+    round_count = 0
+    while not game.is_over and round_count < args.max_rounds:
+        round_count += 1
+        rinfo = game.stage_manager.get_current_round_info()
+
+        # Bot planning actions
+        game.execute_bot_turns()
+
+        focal_p = game.get_focal_player()
+        if focal_p.alive:
+            focal_bot = StandardTempoBot()
+            focal_bot.take_turn(
+                player=focal_p,
+                pool=game.pool,
+                set_data=game.set_data,
+                stage=rinfo.stage,
+                round_in_stage=rinfo.round_in_stage,
+                rng=game.rng,
+            )
+
+        combat_results = game.resolve_round_phase()
+        recorder.capture_snapshot(
+            event_type="ROUND_RESOLVED",
+            combat_results=combat_results,
+        )
+        print(f"  Recorded Stage {rinfo.stage_str} ({rinfo.round_type.value}) - {len(game.players)} Players Monitored")
+
+    print(f"\n[+] Simulation complete! Recorded {len(recorder.frames)} visual snapshots.")
+
+    if args.output_path is not None:
+        out_path = Path(args.output_path).resolve()
+    else:
+        dir_path = Path(args.output_dir).resolve()
+        out_path = dir_path / f"tft_simulation_{set_slug}_seed_{seed}.html"
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    html_content = generate_visual_html(recorder.frames, title=f"TFT Simulation ({set_data.set_name}, Seed {seed})")
+    out_path.write_text(html_content, encoding="utf-8")
+    print(f" [+] Visual Dashboard exported to: file:///{out_path.as_posix()}")
+
+    if args.open_browser:
+        import webbrowser
+        try:
+            webbrowser.open(out_path.as_uri())
+        except Exception:
+            pass
+
+    return 0

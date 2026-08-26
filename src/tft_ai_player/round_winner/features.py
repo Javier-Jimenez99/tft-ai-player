@@ -12,50 +12,28 @@ import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 
 # =============================================================================
-# SET 17 DOMAIN KNOWLEDGE: COSTS, TRAITS, ROLES, ITEMS
+# SET 17 DOMAIN KNOWLEDGE: COSTS, TRAITS, ROLES, ITEMS (OFFICIAL COMMUNITYDRAGON)
 # =============================================================================
+from tft_ai_player.simulation.config import UnitRole
+from tft_ai_player.simulation.sets.set17 import (
+    SET17_CHAMPION_CATALOG,
+    SET17_TRAIT_CATALOG,
+)
+
 CHAMP_BASE_COSTS: dict[str, int] = {
-    # 1-Cost
-    "TFT17_Aatrox": 1, "TFT17_Pantheon": 1, "TFT17_Milio": 1, "TFT17_Jax": 1,
-    "TFT17_Caitlyn": 1, "TFT17_Chogath": 1, "TFT17_Blitzcrank": 1, "TFT17_Poppy": 1,
-    "TFT17_Zoe": 1, "TFT17_Talon": 1, "TFT17_Lulu": 1, "TFT17_Sona": 1,
-    # 2-Cost
-    "TFT17_Maokai": 2, "TFT17_Lissandra": 2, "TFT17_Briar": 2, "TFT17_RekSai": 2,
-    "TFT17_Nasus": 2, "TFT17_Leona": 2, "TFT17_TwistedFate": 2, "TFT17_Rhaast": 2,
-    "TFT17_Shen": 2, "TFT17_Kindred": 2, "TFT17_Gragas": 2, "TFT17_Teemo": 2,
-    "TFT17_Graves": 2, "TFT17_Pyke": 2,
-    # 3-Cost
-    "TFT17_TahmKench": 3, "TFT17_Akali": 3, "TFT17_Illaoi": 3, "TFT17_Nunu": 3,
-    "TFT17_Gwen": 3, "TFT17_Ezreal": 3, "TFT17_Riven": 3, "TFT17_Urgot": 3,
-    "TFT17_Rammus": 3, "TFT17_Gnar": 3, "TFT17_Veigar": 3, "TFT17_Bard": 3,
-    "TFT17_Fizz": 3, "TFT17_Vex": 3, "TFT17_Xayah": 3,
-    # 4-Cost
-    "TFT17_Mordekaiser": 4, "TFT17_Belveth": 4, "TFT17_Ornn": 4, "TFT17_Morgana": 4,
-    "TFT17_Karma": 4, "TFT17_Jinx": 4, "TFT17_Samira": 4, "TFT17_Fiora": 4,
-    "TFT17_Kaisa": 4, "TFT17_Jhin": 4, "TFT17_Corki": 4, "TFT17_MissFortune": 4,
-    "TFT17_Diana": 4,
-    # 5-Cost Legendaries
-    "TFT17_Galio": 5, "TFT17_AurelionSol": 5, "TFT17_Viktor": 5, "TFT17_Aurora": 5,
-    "TFT17_Leblanc": 5, "TFT17_MasterYi": 5, "TFT17_Zed": 5,
+    c.champion_id: c.cost for c in SET17_CHAMPION_CATALOG
 }
 
-# Role Categorization
 AP_CARRIES: set[str] = {
-    "TFT17_Karma", "TFT17_Lissandra", "TFT17_Viktor", "TFT17_Veigar", "TFT17_Teemo",
-    "TFT17_Zoe", "TFT17_Aurora", "TFT17_Vex", "TFT17_TwistedFate", "TFT17_Morgana",
-    "TFT17_AurelionSol", "TFT17_Leblanc", "TFT17_Diana",
+    c.champion_id for c in SET17_CHAMPION_CATALOG if c.role == UnitRole.AP_CARRY
 }
 
 AD_CARRIES: set[str] = {
-    "TFT17_Jinx", "TFT17_Belveth", "TFT17_Caitlyn", "TFT17_Ezreal", "TFT17_Samira",
-    "TFT17_Fiora", "TFT17_Kaisa", "TFT17_Jhin", "TFT17_Corki", "TFT17_MasterYi",
-    "TFT17_MissFortune", "TFT17_Kindred", "TFT17_Graves", "TFT17_Zed",
+    c.champion_id for c in SET17_CHAMPION_CATALOG if c.role == UnitRole.AD_CARRY
 }
 
 MAIN_TANKS: set[str] = {
-    "TFT17_Nasus", "TFT17_Ornn", "TFT17_Maokai", "TFT17_Pantheon", "TFT17_Illaoi",
-    "TFT17_Galio", "TFT17_Jax", "TFT17_Poppy", "TFT17_Chogath", "TFT17_Blitzcrank",
-    "TFT17_TahmKench", "TFT17_Shen", "TFT17_Leona", "TFT17_Rammus", "TFT17_Gragas",
+    c.champion_id for c in SET17_CHAMPION_CATALOG if c.role == UnitRole.TANK
 }
 
 AP_ITEMS: set[str] = {
@@ -88,45 +66,19 @@ MANA_ITEMS: set[str] = {
     "TFT_Item_SpearOfShojin", "TFT_Item_BlueBuff", "TFT_Item_AdaptiveHelm",
 }
 
-# Set 17 Traits & Synergies
 SET17_TRAIT_CHAMPIONS: dict[str, list[str]] = {
-    "Bastion": ["TFT17_Jax", "TFT17_Maokai", "TFT17_Poppy", "TFT17_Shen", "TFT17_Diana", "TFT17_Illaoi"],
-    "Brawler": ["TFT17_Aatrox", "TFT17_Briar", "TFT17_RekSai", "TFT17_Nunu", "TFT17_Gragas", "TFT17_Urgot", "TFT17_Chogath"],
-    "Vanguard": ["TFT17_Mordekaiser", "TFT17_Nasus", "TFT17_Blitzcrank", "TFT17_Leona", "TFT17_Poppy", "TFT17_Galio"],
-    "Sniper": ["TFT17_Caitlyn", "TFT17_Kindred", "TFT17_Jinx", "TFT17_Xayah", "TFT17_Jhin", "TFT17_Corki"],
-    "Stargazer": ["TFT17_Diana", "TFT17_TwistedFate", "TFT17_Leona", "TFT17_Teemo", "TFT17_Karma", "TFT17_Nami"],
-    "SpaceGroove": ["TFT17_Blitzcrank", "TFT17_Lissandra", "TFT17_Nunu", "TFT17_Samira", "TFT17_Teemo", "TFT17_Ornn", "TFT17_Gragas"],
-    "DarkStar": ["TFT17_Mordekaiser", "TFT17_Karma", "TFT17_Jhin", "TFT17_Chogath", "TFT17_DarkStar_FakeUnit"],
-    "Rogue": ["TFT17_Akali", "TFT17_Talon", "TFT17_Fizz", "TFT17_Pyke", "TFT17_Zed", "TFT17_Leblanc"],
-    "PsyOps": ["TFT17_Sona", "TFT17_Pyke", "TFT17_Viktor", "TFT17_Samira", "TFT17_Shen", "TFT17_Ezreal"],
-    "AnimaTech": ["TFT17_Riven", "TFT17_Vex", "TFT17_Jinx", "TFT17_MissFortune", "TFT17_Aurora"],
-    "Marauder": ["TFT17_Pantheon", "TFT17_Aatrox", "TFT17_Graves", "TFT17_Rhaast"],
-    "Sheperd": ["TFT17_Milio", "TFT17_Kindred", "TFT17_Bard", "TFT17_IvernMinion"],
-    "Primordian": ["TFT17_Belveth", "TFT17_Briar", "TFT17_RekSai", "TFT17_Aatrox", "TFT17_Morgana"],
-    "Arbiter": ["TFT17_Morgana", "TFT17_Galio", "TFT17_Leona"],
-    "Voyager": ["TFT17_Ezreal", "TFT17_Corki", "TFT17_Bard", "TFT17_Aurora"],
-    "Challenger": ["TFT17_Belveth", "TFT17_Fiora", "TFT17_Kaisa", "TFT17_MasterYi", "TFT17_Samira"],
-    "Timebreaker": ["TFT17_Diana", "TFT17_Viktor"],
-    "Meeple": ["TFT17_Poppy", "TFT17_Teemo", "TFT17_Veigar", "TFT17_Lulu", "TFT17_Gnar", "TFT17_Fizz", "TFT17_Vex"],
-    "NOVA": ["TFT17_Ornn", "TFT17_AurelionSol", "TFT17_Viktor", "TFT17_Shen", "TFT17_Zoe"],
+    t.trait_id: list(t.champions) for t in SET17_TRAIT_CATALOG.values()
 }
 
 SET17_TRAIT_THRESHOLDS: dict[str, list[int]] = {
-    "Bastion": [2, 4, 6], "Brawler": [2, 4, 6], "Vanguard": [2, 4, 6],
-    "Sniper": [2, 4, 6], "Stargazer": [3, 5, 7], "SpaceGroove": [3, 5, 7],
-    "DarkStar": [3, 6, 9], "Rogue": [2, 4, 6], "PsyOps": [3, 6, 9],
-    "AnimaTech": [3, 5, 7], "Marauder": [2, 4, 6], "Sheperd": [2, 4, 6],
-    "Primordian": [3, 5, 7], "Arbiter": [2, 4, 6], "Voyager": [2, 4],
-    "Challenger": [2, 4, 6], "Timebreaker": [2, 4], "Meeple": [3, 5, 7],
-    "NOVA": [2, 4, 6],
+    t.trait_id: list(t.thresholds) for t in SET17_TRAIT_CATALOG.values()
 }
 
-CHAMP_TO_TRAITS: dict[str, list[str]] = {}
-for trait_name, champs in SET17_TRAIT_CHAMPIONS.items():
-    for c in champs:
-        CHAMP_TO_TRAITS.setdefault(c, []).append(trait_name)
+CHAMP_TO_TRAITS: dict[str, list[str]] = {
+    c.champion_id: list(c.traits) for c in SET17_CHAMPION_CATALOG
+}
 
-ALL_SET17_TRAITS: list[str] = sorted(list(SET17_TRAIT_CHAMPIONS.keys()))
+ALL_SET17_TRAITS: list[str] = sorted(list(SET17_TRAIT_CATALOG.keys()))
 
 
 class TFTBoardFeatureExtractor(BaseEstimator, TransformerMixin):
