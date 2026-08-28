@@ -69,7 +69,8 @@ def extract_pvp_rounds(
     for snapshot in parse_stage_data(timeline):
         match_info = _mapping(snapshot.get("match_info"))
         round_type = _mapping(match_info.get("round_type"))
-        if _text(round_type.get("name")) != "PVP":
+        round_type_val = _text(round_type.get("type")) or _text(round_type.get("name"))
+        if round_type_val != "PVP":
             continue
 
         stage = _text(round_type.get("stage"))

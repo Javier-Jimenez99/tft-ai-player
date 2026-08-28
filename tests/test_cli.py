@@ -212,6 +212,74 @@ def test_collect_does_not_blacklist_on_connection_error(tmp_path: Path, monkeypa
         assert "network-fail-game" not in blacklist_path.read_text(encoding="utf-8")
 
 
+def test_collect_blacklists_player_after_5_consecutive_no_pvp_games(tmp_path: Path, monkeypatch) -> None:
+    players = [_player("BadPlayer"), _player("GoodPlayer")]
+    # BadPlayer has 6 invalid games in a row; game 6 should not even be fetched because player is skipped after 5
+    candidates = {
+        "BadPlayer": [_candidate(f"bad-game-{i}") for i in range(1, 7)],
+        "GoodPlayer": [_candidate("good-game-1")],
+    }
+    fetch_timeline_calls: list[str] = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def fetch_leaderboard_players(self, **_: int) -> list[LeaderboardPlayer]:
+            return players
+
+        def fetch_profile(self, *, game_name: str, **_: str) -> dict[str, str]:
+            return {"game_name": game_name}
+
+        def tracked_timeline_candidates(
+            self,
+            profile: dict[str, str],
+            **_: str,
+        ) -> list[TrackedTimelineCandidate]:
+            return candidates[profile["game_name"]]
+
+        def fetch_timeline(self, url: str) -> dict[str, object]:
+            fetch_timeline_calls.append(url)
+            if "bad-game" in url:
+                # Stage data with no PVP rounds (PVE only)
+                return {
+                    "summoner_name": "Focal",
+                    "stage_data": json.dumps([
+                        {
+                            "me": {"summoner_name": "Focal"},
+                            "match_info": {"round_type": {"stage": "1-2", "name": "Minions", "type": "PVE"}},
+                        }
+                    ]),
+                }
+            return _timeline()
+
+    monkeypatch.setattr(cli, "MetaTftClient", FakeClient)
+    args = Namespace(
+        players=2,
+        games_per_player=10,
+        max_games=10,
+        leaderboard_offset=0,
+        tft_set="TFTSet17",
+        output=tmp_path,
+    )
+
+    # First run: downloads 5 bad games from BadPlayer, blacklists player, skips bad-game-6, and processes GoodPlayer
+    assert cli._collect_leaderboard(args) == 0
+
+    assert "https://matches3.metatft.com/bad-game-6.json" not in fetch_timeline_calls
+    assert "https://matches3.metatft.com/good-game-1.json" in fetch_timeline_calls
+
+    player_blacklist_path = tmp_path / "blacklisted_players.txt"
+    assert player_blacklist_path.exists()
+    assert "BadPlayer#LAS" in player_blacklist_path.read_text(encoding="utf-8")
+
+    # Second run: BadPlayer should be skipped entirely at the profile level
+    fetch_timeline_calls.clear()
+    assert cli._collect_leaderboard(args) == 0
+    # No calls for BadPlayer
+    assert not any("bad-game" in call for call in fetch_timeline_calls)
+
+
 def _player(game_name: str) -> LeaderboardPlayer:
     return LeaderboardPlayer(region="la2", game_name=game_name, tag_line="LAS", player_id=None)
 

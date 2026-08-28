@@ -267,6 +267,7 @@ def _collect_leaderboard(args: argparse.Namespace) -> int:
     writer = PlayerCsvWriter(args.output)
     players = client.fetch_leaderboard_players(count=args.players, offset=args.leaderboard_offset)
     seen_game_ids = _existing_game_ids(args.output)
+    blacklisted_players = writer.load_player_blacklist()
     allowed_queues = getattr(args, "allowed_queues", (1100,))
 
     total_written = 0
@@ -279,6 +280,9 @@ def _collect_leaderboard(args: argparse.Namespace) -> int:
                 "new": total_written,
                 "cached": total_skipped,
             })
+            if player.riot_id in blacklisted_players:
+                tqdm.write(f"skipping blacklisted player {player.riot_id}")
+                continue
             if args.max_games is not None and (total_written + total_skipped) >= args.max_games:
                 break
 
@@ -312,6 +316,7 @@ def _collect_leaderboard(args: argparse.Namespace) -> int:
                 games_per_player=args.games_per_player,
                 seen_game_ids=seen_game_ids,
                 remaining_games_budget=remaining_budget,
+                blacklisted_players=blacklisted_players,
             )
             total_written += written
             total_skipped += skipped
@@ -357,11 +362,14 @@ def _download_player_games(
     games_per_player: int | None,
     seen_game_ids: set[str],
     remaining_games_budget: int | None,
+    blacklisted_players: set[str] | None = None,
+    max_consecutive_no_pvp: int = 5,
 ) -> tuple[int, int]:
     """Download up to games_per_player unique games for one player, returning (written, skipped)."""
 
     written = 0
     skipped = 0
+    consecutive_no_pvp = 0
     for candidate in candidates:
         if games_per_player is not None and (written + skipped) >= games_per_player:
             break
@@ -396,7 +404,14 @@ def _download_player_games(
         except (TimelineValidationError, ValueError) as error:
             writer.add_to_blacklist(game_id, reason=f"validation error: {error}")
             seen_game_ids.add(game_id)
+            consecutive_no_pvp += 1
             tqdm.write(f"blacklisted game {game_id} from {player.riot_id} (validation error): {error}", file=sys.stderr)
+            if consecutive_no_pvp >= max_consecutive_no_pvp:
+                writer.add_player_to_blacklist(player.riot_id, reason=f"{consecutive_no_pvp} consecutive games with no valid PVP rounds")
+                if blacklisted_players is not None:
+                    blacklisted_players.add(player.riot_id)
+                tqdm.write(f"blacklisted player {player.riot_id}: {consecutive_no_pvp} consecutive games with no valid PVP rounds; skipping player", file=sys.stderr)
+                break
             continue
 
         path = writer.write_player_game(
@@ -408,11 +423,19 @@ def _download_player_games(
         if path is None:
             writer.add_to_blacklist(game_id, reason="no valid PVP rounds")
             seen_game_ids.add(game_id)
+            consecutive_no_pvp += 1
             tqdm.write(f"blacklisted game {game_id} from {player.riot_id}: no valid PVP rounds")
+            if consecutive_no_pvp >= max_consecutive_no_pvp:
+                writer.add_player_to_blacklist(player.riot_id, reason=f"{consecutive_no_pvp} consecutive games with no valid PVP rounds")
+                if blacklisted_players is not None:
+                    blacklisted_players.add(player.riot_id)
+                tqdm.write(f"blacklisted player {player.riot_id}: {consecutive_no_pvp} consecutive games with no valid PVP rounds; skipping player", file=sys.stderr)
+                break
             continue
 
         seen_game_ids.add(game_id)
         written += 1
+        consecutive_no_pvp = 0
 
     return written, skipped
 

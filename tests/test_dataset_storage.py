@@ -81,6 +81,26 @@ def test_writer_blacklist_management(tmp_path) -> None:
     assert content.count("game-1") == 1
 
 
+def test_writer_player_blacklist_management(tmp_path) -> None:
+    writer = PlayerCsvWriter(tmp_path)
+    assert writer.load_player_blacklist() == set()
+    assert not writer.is_player_blacklisted("Player#KR1")
+
+    writer.add_player_to_blacklist("Player#KR1", reason="5 consecutive games with no valid PVP rounds")
+    writer.add_player_to_blacklist("Player2#NA1", reason="custom reason")
+    writer.add_player_to_blacklist("Player#KR1", reason="duplicate attempt")
+
+    assert writer.is_player_blacklisted("Player#KR1")
+    assert writer.is_player_blacklisted("Player2#NA1")
+    assert not writer.is_player_blacklisted("Player3#EUW")
+    assert writer.load_player_blacklist() == {"Player#KR1", "Player2#NA1"}
+
+    content = writer.player_blacklist_path().read_text(encoding="utf-8")
+    assert "Player#KR1\t# 5 consecutive games with no valid PVP rounds" in content
+    assert "Player2#NA1\t# custom reason" in content
+    assert content.count("Player#KR1") == 1
+
+
 def _observation(stage: str, match_id: str = "game-uuid") -> RoundObservation:
     return RoundObservation(
         match_id=match_id,
