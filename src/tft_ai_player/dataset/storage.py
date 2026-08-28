@@ -209,6 +209,8 @@ class PlayerCsvWriter:
         collected_from_region: str | None = None,
         match_id_ow: str | None = None,
     ) -> Path | None:
+        if not observations:
+            return None
         return self.write_player_game(
             observations,
             collected_from_riot_id=collected_from_riot_id or observations[0].focal_player,
@@ -223,15 +225,17 @@ GameCsvWriter = PlayerCsvWriter
 def _safe_player_slug(region: str, riot_id: str) -> str:
     """Create a safe filesystem filename from region and Riot ID."""
 
-    clean_region = _safe_segment(region.lower())
+    clean_region = _safe_segment(region.lower() if region else "unknown")
     clean_riot_id = _safe_segment(riot_id)
     return f"{clean_region}_{clean_riot_id}"
 
 
-def _safe_segment(value: str) -> str:
+def _safe_segment(value: str | None) -> str:
+    if value is None:
+        return "unknown"
     normalized = "".join(
         character if character.isalnum() or character in "._-" else "_"
-        for character in value
+        for character in str(value)
     )
     collapsed = re.sub(r"_+", "_", normalized).strip("_")
     return collapsed or "unknown"

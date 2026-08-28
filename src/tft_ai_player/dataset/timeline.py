@@ -70,7 +70,7 @@ def extract_pvp_rounds(
         match_info = _mapping(snapshot.get("match_info"))
         round_type = _mapping(match_info.get("round_type"))
         round_type_val = _text(round_type.get("type")) or _text(round_type.get("name"))
-        if round_type_val != "PVP":
+        if not round_type_val or round_type_val.upper() != "PVP":
             continue
 
         stage = _text(round_type.get("stage"))
@@ -87,13 +87,15 @@ def extract_pvp_rounds(
         metatft_win_prob = _float_at(snapshot, "winrate_info", "model_data", "prediction")
 
         round_start_players = _mapping(_mapping(snapshot.get("round_start_health")).get("player_status"))
-        focal_status = _mapping(round_start_players.get(snapshot_focal_player))
-        opponent_status = _mapping(round_start_players.get(opponent))
+        focal_status = _lookup_player_map(round_start_players, snapshot_focal_player)
+        opponent_status = _lookup_player_map(round_start_players, opponent)
         me = _mapping(snapshot.get("me"))
 
         focal_health = _int(focal_status.get("health"))
         focal_level = _int(focal_status.get("xp"))
         focal_gold = _int(me.get("gold"))
+        if focal_gold is None:
+            focal_gold = _int(focal_status.get("gold"))
         if focal_level is None:
             focal_level = _int(_mapping(me.get("xp")).get("level"))
 
@@ -123,12 +125,12 @@ def extract_pvp_rounds(
                 match_id=match_id,
                 game_datetime=game_datetime,
                 round_stage=stage,
-                round_type=_text(round_type.get("type")) or "PVP",
+                round_type="PVP",
                 tft_set=tft_set,
                 game_version=game_version,
                 game_client_version=client_version,
                 timeline_schema_version=schema_version,
-                portal=portal,
+                portal=portal or _text(snapshot.get("portal")),
                 focal_player=snapshot_focal_player,
                 focal_tier=effective_focal_tier,
                 focal_rating_numeric=focal_rating_numeric,
@@ -189,11 +191,30 @@ def _precombat_state(
     }
 
 
+def _lookup_player_map(mapping: Mapping[str, Any], player_name: str) -> Mapping[str, Any]:
+    if not mapping or not player_name:
+        return {}
+    exact = mapping.get(player_name)
+    if isinstance(exact, Mapping):
+        return exact
+    player_lower = player_name.lower()
+    for key, value in mapping.items():
+        if isinstance(key, str) and key.lower() == player_lower and isinstance(value, Mapping):
+            return value
+    return {}
+
+
 def _extract_augments(snapshot: Mapping[str, Any], player_name: str, *, is_focal: bool) -> list[str]:
     augments_raw = None
     aug_dict = snapshot.get("augments")
     if isinstance(aug_dict, Mapping):
         augments_raw = aug_dict.get(player_name)
+        if not augments_raw and player_name:
+            player_lower = player_name.lower()
+            for key, val in aug_dict.items():
+                if isinstance(key, str) and key.lower() == player_lower:
+                    augments_raw = val
+                    break
     elif isinstance(aug_dict, Sequence) and not isinstance(aug_dict, (str, bytes)) and is_focal:
         augments_raw = aug_dict
 
@@ -206,6 +227,12 @@ def _extract_augments(snapshot: Mapping[str, Any], player_name: str, *, is_focal
         ow_aug = snapshot.get("overwolf_augments")
         if isinstance(ow_aug, Mapping):
             augments_raw = ow_aug.get(player_name)
+            if not augments_raw and player_name:
+                player_lower = player_name.lower()
+                for key, val in ow_aug.items():
+                    if isinstance(key, str) and key.lower() == player_lower:
+                        augments_raw = val
+                        break
 
     if not augments_raw:
         model_data = _mapping(_mapping(snapshot.get("winrate_info")).get("model_data"))
@@ -258,9 +285,17 @@ def _clean_board(raw_units: Sequence[Any]) -> list[dict[str, Any]]:
 def _outcome_for(player_name: str, match_info: Mapping[str, Any]) -> RoundOutcome | None:
     outcomes = _mapping(match_info.get("round_outcome"))
     outcome_record = _mapping(outcomes.get(player_name))
+    if not outcome_record and player_name:
+        player_lower = player_name.lower()
+        for key, value in outcomes.items():
+            if isinstance(key, str) and key.lower() == player_lower and isinstance(value, Mapping):
+                outcome_record = value
+                break
     outcome = _text(outcome_record.get("outcome"))
-    if outcome in {"victory", "defeat"}:
-        return outcome
+    if outcome:
+        outcome_lower = outcome.lower()
+        if outcome_lower in {"victory", "defeat"}:
+            return outcome_lower
     return None
 
 
@@ -283,7 +318,7 @@ def _is_non_empty_sequence(value: Any) -> bool:
 
 def _text(value: Any) -> str | None:
     if isinstance(value, str) and value.strip():
-        return value
+        return value.strip()
     return None
 
 

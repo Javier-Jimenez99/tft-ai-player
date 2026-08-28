@@ -280,6 +280,94 @@ def test_collect_blacklists_player_after_5_consecutive_no_pvp_games(tmp_path: Pa
     assert not any("bad-game" in call for call in fetch_timeline_calls)
 
 
+def test_collect_profile_writes_csv(tmp_path: Path, monkeypatch) -> None:
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def fetch_profile(self, *, game_name: str, **_: str) -> dict[str, str]:
+            return {"game_name": game_name}
+
+        def tracked_timeline_candidates(self, profile: dict[str, str], **_: str) -> list[TrackedTimelineCandidate]:
+            return [_candidate("profile-game-1")]
+
+        def fetch_timeline(self, _: str) -> dict[str, object]:
+            return _timeline()
+
+    monkeypatch.setattr(cli, "MetaTftClient", FakeClient)
+    args = Namespace(
+        region="la2",
+        game_name="SoloPlayer",
+        tag_line="LAS",
+        tft_set="TFTSet17",
+        games=1,
+        output=tmp_path,
+    )
+    assert cli._collect_profile(args) == 0
+    csv_path = tmp_path / "players" / "la2_SoloPlayer_LAS.csv"
+    assert csv_path.exists()
+    assert "profile-game-1" in csv_path.read_text(encoding="utf-8")
+
+
+def test_collect_profile_skips_blacklisted_player(tmp_path: Path, monkeypatch) -> None:
+    # Blacklist player first
+    writer = cli.PlayerCsvWriter(tmp_path)
+    writer.add_player_to_blacklist("SoloPlayer#LAS", reason="test")
+
+    fetch_called = False
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def fetch_profile(self, *args, **kwargs) -> dict[str, str]:
+            nonlocal fetch_called
+            fetch_called = True
+            return {}
+
+    monkeypatch.setattr(cli, "MetaTftClient", FakeClient)
+    args = Namespace(
+        region="la2",
+        game_name="SoloPlayer",
+        tag_line="LAS",
+        tft_set="TFTSet17",
+        games=1,
+        output=tmp_path,
+    )
+    assert cli._collect_profile(args) == 0
+    assert not fetch_called
+
+
+def test_collect_timeline_empty_blacklists_match(tmp_path: Path, monkeypatch) -> None:
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def fetch_timeline(self, _: str) -> dict[str, object]:
+            return {
+                "summoner_name": "Focal",
+                "stage_data": json.dumps([
+                    {
+                        "me": {"summoner_name": "Focal"},
+                        "match_info": {"round_type": {"stage": "1-2", "name": "Minions", "type": "PVE"}},
+                    }
+                ]),
+            }
+
+    monkeypatch.setattr(cli, "MetaTftClient", FakeClient)
+    args = Namespace(
+        timeline_url="https://matches3.metatft.com/empty-timeline.json",
+        match_id="empty-timeline-id",
+        tft_set="TFTSet17",
+        game_version="16.16",
+        output=tmp_path,
+    )
+    assert cli._collect_timeline(args) == 0
+    blacklist_path = tmp_path / "blacklisted_games.txt"
+    assert blacklist_path.exists()
+    assert "empty-timeline-id" in blacklist_path.read_text(encoding="utf-8")
+
+
 def _player(game_name: str) -> LeaderboardPlayer:
     return LeaderboardPlayer(region="la2", game_name=game_name, tag_line="LAS", player_id=None)
 

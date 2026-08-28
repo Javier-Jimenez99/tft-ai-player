@@ -101,6 +101,19 @@ def test_writer_player_blacklist_management(tmp_path) -> None:
     assert content.count("Player#KR1") == 1
 
 
+def test_write_game_compatibility_alias(tmp_path) -> None:
+    writer = PlayerCsvWriter(tmp_path)
+    # Empty observations should safely return None without IndexError
+    assert writer.write_game([]) is None
+
+    # Non-empty observations should derive focal_player and write successfully
+    obs = [_observation(stage="2-2")]
+    path = writer.write_game(obs)
+    assert path is not None
+    assert path.exists()
+    assert "unknown_Focal.csv" in path.name
+
+
 def _observation(stage: str, match_id: str = "game-uuid") -> RoundObservation:
     return RoundObservation(
         match_id=match_id,

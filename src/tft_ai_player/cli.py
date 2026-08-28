@@ -225,6 +225,11 @@ def _collect_profile(args: argparse.Namespace) -> int:
         tag_line=args.tag_line,
         player_id=None,
     )
+    blacklisted_players = writer.load_player_blacklist()
+    if player.riot_id in blacklisted_players:
+        print(f"skipping blacklisted player {player.riot_id}", file=sys.stderr)
+        return 0
+
     profile = client.fetch_profile(
         region=player.region,
         game_name=player.game_name,
@@ -247,6 +252,7 @@ def _collect_profile(args: argparse.Namespace) -> int:
         games_per_player=args.games,
         seen_game_ids=seen_game_ids,
         remaining_games_budget=args.games,
+        blacklisted_players=blacklisted_players,
     )
     print(f"collected profile {player.riot_id}: {written} new games written, {skipped} existing games skipped")
     return 0
@@ -452,8 +458,8 @@ def _existing_game_ids(root: Path) -> set[str]:
                     reader = _csv.DictReader(file)
                     for row in reader:
                         match_id = row.get("match_id")
-                        if match_id:
-                            seen.add(match_id)
+                        if match_id and match_id.strip():
+                            seen.add(match_id.strip())
             except Exception:
                 continue
 
