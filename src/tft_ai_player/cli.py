@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import random
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -31,6 +32,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return train_main()
         if args.command == "simulate":
             return _run_simulation(args)
+        if args.command == "rl-train":
+            return _run_rl_train(args)
+        if args.command == "rl-league":
+            return _run_rl_league(args)
     except (MetaTftRequestError, TimelineValidationError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -208,6 +213,64 @@ def _build_parser() -> argparse.ArgumentParser:
         "--open-browser",
         action="store_true",
         help="automatically open the exported dashboard in the default browser",
+    )
+
+    rl_train_parser = subcommands.add_parser(
+        "rl-train",
+        help="train autonomous RL agent using Maskable PPO and League Self-Play",
+    )
+    rl_train_parser.add_argument(
+        "--generations",
+        type=int,
+        default=5,
+        help="number of training iterations/generations to run (default: 5)",
+    )
+    rl_train_parser.add_argument(
+        "--rollout-steps",
+        type=int,
+        default=256,
+        help="number of rollout steps to collect per generation (default: 256)",
+    )
+    rl_train_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=64,
+        help="PPO mini-batch size (default: 64)",
+    )
+    rl_train_parser.add_argument(
+        "--eval-every",
+        type=int,
+        default=2,
+        help="evaluate against league every N generations (default: 2)",
+    )
+    rl_train_parser.add_argument(
+        "--checkpoint-dir",
+        type=str,
+        default="checkpoints/league",
+        help="directory to persist model weights and league profiles (default: checkpoints/league)",
+    )
+
+    rl_league_parser = subcommands.add_parser(
+        "rl-league",
+        help="run or inspect the AlphaStar-style 8-player TFT multi-agent league",
+    )
+    rl_league_parser.add_argument(
+        "--matches",
+        type=int,
+        default=10,
+        help="number of 8-player tournament matches to simulate (default: 10)",
+    )
+    rl_league_parser.add_argument(
+        "--checkpoint-dir",
+        type=str,
+        default="checkpoints/league",
+        help="directory containing league checkpoints (default: checkpoints/league)",
+    )
+    rl_league_parser.add_argument(
+        "--markdown-out",
+        type=str,
+        default=None,
+        help="optional destination file to write markdown leaderboard report",
     )
 
     return parser
@@ -507,3 +570,77 @@ def _run_simulation(args: argparse.Namespace) -> int:
             pass
 
     return 0
+
+
+def _run_rl_train(args: argparse.Namespace) -> int:
+    """Execute RL Maskable PPO training loop with League evaluation."""
+    from tft_ai_player.rl.evaluation.report import generate_league_markdown_report, print_league_terminal_summary
+    from tft_ai_player.rl.train import LeagueTrainer
+
+    print("\n" + "=" * 70)
+    print(" [TFT RL TRAINING] Initializing Maskable PPO & AlphaStar League...")
+    print(f"  Generations: {args.generations} | Rollout Steps: {args.rollout_steps} | Batch Size: {args.batch_size}")
+    print("=" * 70)
+
+    trainer = LeagueTrainer(
+        buffer_size=args.rollout_steps + 64,
+        batch_size=args.batch_size,
+        checkpoint_dir=args.checkpoint_dir,
+    )
+
+    for gen in range(1, args.generations + 1):
+        metrics = trainer.train_iteration(
+            generation=gen,
+            rollout_steps=args.rollout_steps,
+            eval_every=args.eval_every,
+        )
+        print(
+            f" [Gen {gen:03d}/{args.generations:03d}] Loss: {metrics['loss']:.4f} | PolLoss: {metrics['policy_loss']:.4f} | ValLoss: {metrics['value_loss']:.4f} | Ent: {metrics['entropy']:.3f} | Steps: {metrics['steps']}"
+        )
+        if "eval_avg_placement" in metrics:
+            print(
+                f"   |--> Benchmark Placement: {metrics['eval_avg_placement']:.2f} | Top 4: {metrics['eval_top4_rate']*100:.1f}% | League Elo: {metrics['league_elo']:.1f}"
+            )
+
+    print("\n[+] Training completed successfully!")
+    print_league_terminal_summary(trainer.league)
+    return 0
+
+
+def _run_rl_league(args: argparse.Namespace) -> int:
+    """Run tournament matches across the TFT multi-agent league and update Elo ratings."""
+    from tft_ai_player.rl.evaluation.evaluator import TournamentEvaluator
+    from tft_ai_player.rl.evaluation.report import generate_league_markdown_report, print_league_terminal_summary
+    from tft_ai_player.rl.league.league_manager import LeagueManager
+
+    print("\n" + "=" * 70)
+    print(f" [TFT MULTI-AGENT LEAGUE] Simulating {args.matches} 8-player tournament matches...")
+    print("=" * 70)
+
+    league = LeagueManager(checkpoint_dir=args.checkpoint_dir)
+    evaluator = TournamentEvaluator(league)
+
+    # Base registered agent IDs to populate lobbies
+    agent_pool = list(league.profiles.keys())
+    if len(agent_pool) < 8:
+        agent_pool = (agent_pool * 8)[:8]
+
+    for match_idx in range(1, args.matches + 1):
+        seed = 1000 + match_idx
+        # Sample seats
+        seats = [str(s) for s in random.choices(agent_pool, k=8)]
+        result = evaluator.run_match(agent_seats=seats, seed=seed)
+        podium = [f"#{rank} {aid}" for aid, rank in sorted(result.placements.items(), key=lambda x: x[1])[:3]]
+        print(f"  Match {match_idx:02d}/{args.matches:02d} (Seed {seed}): Podium -> {', '.join(podium)}")
+
+    print("\n[+] Tournament series complete!")
+    print_league_terminal_summary(league)
+
+    if args.markdown_out:
+        out_path = Path(args.markdown_out).resolve()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        report_md = generate_league_markdown_report(league)
+        out_path.write_text(report_md, encoding="utf-8")
+        print(f" [+] Markdown Leaderboard written to: file:///{out_path.as_posix()}")
+
+    return 0

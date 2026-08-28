@@ -19,16 +19,23 @@ tft-ai-player/
 │   │   ├── features.py      # 1,500+ combat feature extractor (BiS items, traits, geometry)
 │   │   ├── pipeline.py      # Tuned GBDT model builders (LightGBM, XGBoost, CatBoost)
 │   │   ├── metrics.py       # Probabilistic evaluation (Brier score, ECE, Skill score)
-│   │   ├── trainer.py       # Model training, Platt calibration, serialization & inference
-│   │   └── train.py         # Standalone CLI training script
+│   │   └── trainer.py       # Model training, Platt calibration, serialization & inference
+│   ├── simulation/          # Full 8-player TFT game simulation & Gymnasium RL env
+│   │   ├── game.py          # Complete 8-player state machine, combat, shop, pool & items
+│   │   ├── gym_env.py       # Gymnasium (v1.0+) environment wrapper with action masking
+│   │   ├── actions.py       # 1,721 micro-action encoder/decoder & boolean action masks
+│   │   └── visualizer.py    # Self-contained interactive HTML replay generator
+│   ├── rl/                  # Autonomous RL & AlphaStar League System (Subsystem 2)
+│   │   ├── models/          # Multi-modal Actor-Critic with entity embeddings
+│   │   ├── algorithms/      # Maskable PPO with GAE-lambda & RolloutBuffer
+│   │   ├── league/          # 8-player multilateral Elo & PFSP matchmaking
+│   │   └── evaluation/      # Paired-seed CRN luck mitigation benchmarks & reports
 │   └── cli.py               # Unified CLI dispatcher (tft-ai-player)
-├── notebooks/
-│   ├── eda_tft_games.ipynb           # Exploratory data analysis of competitive rounds
-│   ├── train_round_winner_fast.ipynb # Fast (<2 min) LightGBM training & analysis
-│   └── train_round_winner_models.ipynb # Deep multi-model benchmarking & calibration
-├── docs/images/             # Publication-quality benchmark and EDA visualizations
-├── tests/                   # Full pytest suite (dataset, features, client, trainer)
-└── data/                    # Ingested match CSVs (git-ignored)
+├── docs/
+│   ├── rl_models_and_league.md  # Deep technical architecture guide for RL & League
+│   └── images/              # Benchmark and visual analysis charts
+├── tests/                   # 56 unit & integration tests (RL, sim, features, dataset)
+└── dashboards/              # Generated interactive HTML visual replays
 ```
 
 ---
@@ -182,7 +189,22 @@ print(f"Predicted Win Probability: {win_probability * 100:.1f}%")
 # Output: Predicted Win Probability: 91.4%
 ```
 
-### 5. Run Tests
+### 5. Train RL Agents & Run Multi-Agent League
+
+```powershell
+# Run 10 tournament matches across league bots and print Elo standings
+uv run tft-ai-player rl-league --matches 10
+
+# Train the autonomous agent using Maskable PPO and League Self-Play
+uv run tft-ai-player rl-train --generations 20 --rollout-steps 512 --eval-every 2
+
+# Export a markdown leaderboard report
+uv run tft-ai-player rl-league --matches 20 --markdown-out docs/leaderboard.md
+```
+
+> 📖 **Deep Technical Architecture**: See [`docs/rl_models_and_league.md`](docs/rl_models_and_league.md) for full documentation on entity embeddings, invalid action masking across 1,721 micro-actions, GAE-$\lambda$ variance reduction, paired-seed luck mitigation, and 8-player multilateral Elo rating mathematics.
+
+### 6. Run Tests
 ```powershell
 uv run pytest tests/
 ```
@@ -196,9 +218,11 @@ uv run pytest tests/
   - Fast LightGBM & XGBoost training with smooth Platt probability calibration.
   - Benchmarked against MetaTFT across 179,000+ rounds.
   - Model serialization and lightweight inference engine.
-- [ ] **Subsystem 2: Economy & Leveling Engine (`economy`)**
-  - Interest optimization, streak management, and leveling curve decider.
-- [ ] **Subsystem 3: Reroll & Shop Decision Agent (`shop`)**
-  - Expected unit value calculation and roll-down stopping policy.
-- [ ] **Subsystem 4: Autonomous Live Game Playing Agent (`agent`)**
+- [x] **Subsystem 2: Autonomous Reinforcement Learning & League Engine (`rl`)**
+  - Multi-modal Actor-Critic neural network (`TFTActorCritic`) with entity embeddings.
+  - Maskable PPO with Generalized Advantage Estimation (GAE-$\lambda$) across 1,721 actions.
+  - AlphaStar-inspired League system with Prioritized Fictitious Self-Play (PFSP) matchmaking.
+  - Multilateral 8-player Elo rating system with pairwise decomposition and Top-4 statistics.
+  - Paired-seed Common Random Numbers (CRN) benchmark to isolate strategy from TFT luck.
+- [ ] **Subsystem 3: Live Game Computer Vision & Ingestion (`vision`)**
   - Screen capture / Game state ingestion and automated action execution.
