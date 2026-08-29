@@ -69,7 +69,7 @@ class TFTGame:
         # Stage 1-1 Initial Setup: First Carousel & Starting Gold
         self.stage_manager.handle_carousel(self.players, pool=self.pool, rng=self.rng)
         for player in self.players:
-            player.gold = 2  # Stage 1-1 starting gold
+            player.gold = self.set_data.starting_gold  # 0 starting bank gold for Stage 1-1 (Carousel round)
 
         # Start first round
         self.stage_manager.execute_round_start(self.players, self.pool, rng=self.rng)
@@ -151,6 +151,15 @@ class TFTGame:
                         loser.streak = -1
                     else:
                         loser.streak -= 1
+
+            # Process trait loot, Coven essence, Draven bounties, and shop ignites
+            if results:
+                self.stage_manager.handle_combat_loot_and_traits(
+                    players=self.players,
+                    combat_results=results,
+                    pool=self.pool,
+                    rng=self.rng,
+                )
 
         self.round_combat_results = results
 

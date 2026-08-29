@@ -209,6 +209,110 @@ def test_extract_pvp_rounds_focal_augments_progressive_unlock() -> None:
     assert observations[2].focal_augments == ["TFT18_Aug_1", "TFT18_Aug_2", "TFT18_Aug_3"]
 
 
+def test_extract_pvp_rounds_handles_metatft_round_type_format() -> None:
+    """MetaTFT sets type='PVP' and name='Combat' or name='Augment'."""
+    timeline = {
+        "summoner_name": "Focal",
+        "stage_data": json.dumps(
+            [
+                {
+                    "me": {"summoner_name": "Focal", "gold": 20, "xp": {"level": 4}},
+                    "round_start_health": {
+                        "player_status": {
+                            "Focal": {"health": 100, "xp": 4},
+                            "Opp": {"health": 100, "xp": 4},
+                        }
+                    },
+                    "match_info": {
+                        "round_type": {"stage": "2-1", "name": "Augment", "type": "PVP"},
+                        "opponent": {"name": "Opp"},
+                        "round_outcome": {"Focal": {"outcome": "victory"}},
+                    },
+                    "matchup_boards": {
+                        "player_board": [{"unit": "TFT18_Renata", "tier": 1, "loc": "D1", "items": []}],
+                        "opponent_board": [{"unit": "TFT18_Singed", "tier": 1, "loc": "A1", "items": []}],
+                    },
+                },
+                {
+                    "me": {"summoner_name": "Focal", "gold": 20, "xp": {"level": 4}},
+                    "round_start_health": {
+                        "player_status": {
+                            "Focal": {"health": 100, "xp": 4},
+                            "Opp": {"health": 100, "xp": 4},
+                        }
+                    },
+                    "match_info": {
+                        "round_type": {"stage": "2-7", "name": "Krugs", "type": "PVE"},
+                        "opponent": {"name": "Opp"},
+                        "round_outcome": {"Focal": {"outcome": "victory"}},
+                    },
+                    "matchup_boards": {
+                        "player_board": [{"unit": "TFT18_Renata", "tier": 1, "loc": "D1", "items": []}],
+                        "opponent_board": [{"unit": "TFT18_Singed", "tier": 1, "loc": "A1", "items": []}],
+                    },
+                },
+            ]
+        ),
+    }
+
+    observations = extract_pvp_rounds(
+        timeline,
+        match_id="test_metatft_format",
+        tft_set="TFTSet18",
+        game_version="16.16",
+    )
+    assert len(observations) == 1
+    assert observations[0].round_stage == "2-1"
+    assert observations[0].round_type == "PVP"
+
+
+def test_extract_pvp_rounds_case_and_whitespace_insensitivity() -> None:
+    """Verify robust extraction even when casing or whitespace varies."""
+    timeline = {
+        "summoner_name": "focal",
+        "portal": "  TFT_Portal_Test  ",
+        "stage_data": json.dumps(
+            [
+                {
+                    "me": {"summoner_name": "Focal", "gold": 15},
+                    "augments": {"Focal": [" TFT18_Aug_1 "]},
+                    "round_start_health": {
+                        "player_status": {
+                            "FOCAL": {"health": 95, "xp": 5},
+                            "OPPONENT": {"health": 80, "xp": 5},
+                        }
+                    },
+                    "match_info": {
+                        "round_type": {"stage": "3-2", "name": "pvp", "type": " PVP "},
+                        "opponent": {"name": "Opponent"},
+                        "round_outcome": {"Focal": {"outcome": "VICTORY"}},
+                    },
+                    "matchup_boards": {
+                        "player_board": [{"unit": "TFT18_Renata", "tier": 2, "loc": "D1", "items": [" Item1 "]}],
+                        "opponent_board": [{"unit": "TFT18_Singed", "tier": 2, "loc": "A1", "items": []}],
+                    },
+                }
+            ]
+        ),
+    }
+
+    observations = extract_pvp_rounds(
+        timeline,
+        match_id="test_case_insensitivity",
+        tft_set="TFTSet18",
+        game_version="16.16",
+    )
+    assert len(observations) == 1
+    obs = observations[0]
+    assert obs.round_stage == "3-2"
+    assert obs.round_type == "PVP"
+    assert obs.outcome == "victory"
+    assert obs.focal_health == 95
+    assert obs.opponent_health == 80
+    assert obs.focal_augments == ["TFT18_Aug_1"]
+    assert obs.portal == "TFT_Portal_Test"
+
+
 def _snapshot(*, stage: str, round_name: str, outcome: str) -> dict[str, object]:
     return {
         "me": {"summoner_name": "Focal", "gold": "20", "xp": {"level": 4}},

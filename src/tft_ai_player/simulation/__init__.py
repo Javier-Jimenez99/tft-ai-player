@@ -10,6 +10,13 @@ from tft_ai_player.simulation.actions import (
     execute_action,
     get_action_mask,
 )
+from tft_ai_player.simulation.augments import (
+    SET18_AUGMENTS_CATALOG,
+    AugmentCategory,
+    AugmentDef,
+    AugmentManager,
+    AugmentTier,
+)
 from tft_ai_player.simulation.bots import (
     BaseBot,
     GreedyBankerBot,

@@ -66,11 +66,25 @@ class ChampionPool:
         self,
         level: int,
         rng: random.Random | None = None,
+        cost_tier_bonus: int = 0,
+        candidates_pool: list[str] | None = None,
     ) -> str | None:
         """Sample a champion according to level shop odds and current pool availability."""
         r = rng or random
 
-        odds = self.set_data.shop_odds.get(level, self.set_data.shop_odds.get(1, (1.0, 0, 0, 0, 0)))
+        if candidates_pool is not None:
+            available = [c for c in candidates_pool if self.counts.get(c, 0) > 0]
+            if not available:
+                available = [c for c, count in self.counts.items() if count > 0]
+                if not available:
+                    return None
+            weights = [self.counts[c] for c in available]
+            chosen_champ = r.choices(available, weights=weights, k=1)[0]
+            self.counts[chosen_champ] -= 1
+            return chosen_champ
+
+        effective_level = min(self.set_data.max_level, level + cost_tier_bonus)
+        odds = self.set_data.shop_odds.get(effective_level, self.set_data.shop_odds.get(1, (1.0, 0, 0, 0, 0)))
         # Odds are for 1-cost, 2-cost, 3-cost, 4-cost, 5-cost
         cost_tiers = [1, 2, 3, 4, 5]
         chosen_cost = r.choices(cost_tiers, weights=odds, k=1)[0]
@@ -122,6 +136,8 @@ class Shop:
         pool: ChampionPool,
         set_data: SetData,
         rng: random.Random | None = None,
+        ignited_slots: Sequence[int] = (),
+        candidates_pool: list[str] | None = None,
     ) -> None:
         """Return unpurchased cards and draw 5 new cards from the pool."""
         if self.locked:
@@ -133,7 +149,18 @@ class Shop:
                 pool.return_champion(slot, star_level=1)
 
         # Draw 5 new cards
-        self.slots = [pool.draw_champion(level, rng=rng) for _ in range(5)]
+        new_slots: list[str | None] = []
+        for slot_idx in range(5):
+            cost_bonus = 1 if slot_idx in ignited_slots else 0
+            new_slots.append(
+                pool.draw_champion(
+                    level=level,
+                    rng=rng,
+                    cost_tier_bonus=cost_bonus,
+                    candidates_pool=candidates_pool,
+                )
+            )
+        self.slots = new_slots
 
     def take(self, slot_idx: int) -> str | None:
         """Take card at slot_idx."""
@@ -171,6 +198,23 @@ class Player:
         self.shop: Shop = Shop()
         self.last_opponents: list[int] = []
 
+        # Augments & Consumables
+        self.augments: list[str] = []
+        self.duplicators: int = 0
+        self.reforgers: int = 0
+        self.removers: int = 0
+        self.extra_team_size: int = 0
+        self.max_interest_cap: int = set_data.max_interest
+        self.free_rerolls: int = 0
+
+        # Economy & Loot Trait Tracking
+        self.coven_essence: int = 0
+        self.fae_pixies: int = 0
+        self.draven_bounty_progress: int = 0
+        self.rengar_takedowns: int = 0
+        self.ignited_shop_slots: list[int] = []
+        self.combats_since_overrun: int = 0
+
     # -------------------------------------------------------------------------
     # Board & Unit Queries
     # -------------------------------------------------------------------------
@@ -178,17 +222,24 @@ class Player:
     @property
     def board_unit_count(self) -> int:
         """Number of champions currently fielded on the board."""
-        return len(self.board)
+        # Account for multi-slot champions (Elder Dragon takes 2 slots)
+        count = 0
+        for unit in self.board.values():
+            if "ElderDragon" in unit.champion_id:
+                count += 2
+            else:
+                count += 1
+        return count
 
     @property
     def max_board_units(self) -> int:
-        """Maximum number of champions allowed on the board (level + items).
+        """Maximum number of champions allowed on the board (level + items + augments).
 
         Includes all team size expanding items (Tactician's Crown, Tactician's Shield,
         Tactician's Cape, etc.) equipped on board units, equipped on bench units,
-        or held on the item bench.
+        or held on the item bench, plus augment bonuses.
         """
-        extra_slots = 0
+        extra_slots = self.extra_team_size
         # Fielded board units
         for unit in self.board.values():
             for item_id in unit.items:
@@ -269,7 +320,7 @@ class Player:
     def calculate_interest_gold(self) -> int:
         """Calculate interest income for the current round based on banked gold."""
         interest = int(self.gold * self.set_data.interest_rate)
-        return min(interest, self.set_data.max_interest)
+        return min(interest, self.max_interest_cap)
 
     def calculate_streak_gold(self) -> int:
         """Calculate streak bonus income."""
@@ -670,16 +721,119 @@ class Player:
         return True
 
     def reroll_shop(self, pool: ChampionPool, rng: random.Random | None = None) -> bool:
-        """Reroll shop for 2 Gold."""
-        if self.gold < self.set_data.reroll_cost:
+        """Reroll shop for 2 Gold or using a free reroll token."""
+        if self.free_rerolls > 0:
+            self.free_rerolls -= 1
+        elif self.gold >= self.set_data.reroll_cost:
+            self.gold -= self.set_data.reroll_cost
+        else:
             return False
-        self.gold -= self.set_data.reroll_cost
-        self.shop.refresh(self.level, pool, self.set_data, rng=rng)
+
+        self.shop.refresh(self.level, pool, self.set_data, rng=rng, ignited_slots=self.ignited_shop_slots)
+        self.ignited_shop_slots = []  # Consumed on roll
         return True
 
     def toggle_shop_lock(self) -> None:
         """Toggle shop lock status."""
         self.shop.locked = not self.shop.locked
+
+    # -------------------------------------------------------------------------
+    # Consumables Actions
+    # -------------------------------------------------------------------------
+
+    def use_duplicator(
+        self,
+        is_board: bool,
+        loc: int | tuple[int, int],
+        pool: ChampionPool,
+    ) -> bool:
+        """Use a Champion Duplicator on target champion to clone a 1-star copy."""
+        if self.duplicators <= 0:
+            return False
+
+        unit: ChampionInstance | None = None
+        if is_board and isinstance(loc, tuple):
+            unit = self.board.get(loc)
+        elif not is_board and isinstance(loc, int) and 0 <= loc < len(self.bench):
+            unit = self.bench[loc]
+
+        if unit is None:
+            return False
+
+        cdef = self.set_data.champions.get(unit.champion_id)
+        cost = cdef.cost if cdef else unit.cost
+        clone = ChampionInstance(champion_id=unit.champion_id, cost=cost, star_level=1)
+        added = self.add_champion_to_bench(clone, pool=pool, allow_board_overflow=True)
+        if added:
+            self.duplicators -= 1
+            return True
+        return False
+
+    def use_remover(
+        self,
+        is_board: bool,
+        loc: int | tuple[int, int],
+    ) -> bool:
+        """Use a Magnetic Remover to pop all equipped items off a champion."""
+        if self.removers <= 0:
+            return False
+
+        unit: ChampionInstance | None = None
+        if is_board and isinstance(loc, tuple):
+            unit = self.board.get(loc)
+        elif not is_board and isinstance(loc, int) and 0 <= loc < len(self.bench):
+            unit = self.bench[loc]
+
+        if unit is None or not unit.items:
+            return False
+
+        # Pop all items to item bench
+        items_to_pop = list(unit.items)
+        unit.items.clear()
+        for item_id in items_to_pop:
+            self.add_item(item_id)
+
+        self.removers -= 1
+        return True
+
+    def use_reforger(
+        self,
+        item_bench_idx: int,
+        rng: random.Random | None = None,
+    ) -> bool:
+        """Use a Reforger to reroll an item on the bench into another random one."""
+        if self.reforgers <= 0 or not (0 <= item_bench_idx < len(self.item_bench)):
+            return False
+
+        item_inst = self.item_bench[item_bench_idx]
+        r = rng or random
+
+        if item_inst.is_component:
+            candidates = [c for c in self.set_data.components if c != item_inst.item_id]
+            if candidates:
+                new_item_id = r.choice(candidates)
+                idef = self.set_data.items.get(new_item_id)
+                self.item_bench[item_bench_idx] = ItemInstance(
+                    item_id=new_item_id,
+                    name=idef.name if idef else new_item_id,
+                    is_component=True,
+                )
+                self.reforgers -= 1
+                return True
+        else:
+            candidates = [i for i, idef in self.set_data.items.items() if not idef.is_component and i != item_inst.item_id]
+            if candidates:
+                new_item_id = r.choice(candidates)
+                idef = self.set_data.items.get(new_item_id)
+                self.item_bench[item_bench_idx] = ItemInstance(
+                    item_id=new_item_id,
+                    name=idef.name if idef else new_item_id,
+                    is_component=False,
+                )
+                self.reforgers -= 1
+                return True
+
+        return False
 
     # -------------------------------------------------------------------------
     # State Serialization
@@ -708,4 +862,11 @@ class Player:
             "shop_locked": self.shop.locked,
             "board_value": self.get_board_value(),
             "active_traits": self.get_active_traits(),
+            "augments": list(self.augments),
+            "duplicators": self.duplicators,
+            "reforgers": self.reforgers,
+            "removers": self.removers,
+            "free_rerolls": self.free_rerolls,
+            "coven_essence": self.coven_essence,
+            "fae_pixies": self.fae_pixies,
         }
