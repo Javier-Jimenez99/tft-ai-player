@@ -152,6 +152,15 @@ class TFTGame:
                     else:
                         loser.streak -= 1
 
+            # Process trait loot, Coven essence, Draven bounties, and shop ignites
+            if results:
+                self.stage_manager.handle_combat_loot_and_traits(
+                    players=self.players,
+                    combat_results=results,
+                    pool=self.pool,
+                    rng=self.rng,
+                )
+
         self.round_combat_results = results
 
         # 2. Check for Eliminations

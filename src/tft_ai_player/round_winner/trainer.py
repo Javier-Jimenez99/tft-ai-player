@@ -56,6 +56,10 @@ class RoundWinnerTrainer:
         """Load and clean round observations from directory of CSV files."""
         path = Path(data_dir)
         csv_files = list(path.glob("*.csv"))
+        if not csv_files and (path / "players").exists():
+            csv_files = list((path / "players").glob("*.csv"))
+        if not csv_files:
+            csv_files = list(path.rglob("*.csv"))
         if not csv_files:
             raise FileNotFoundError(f"No CSV files found in directory: {path.resolve()}")
 
@@ -232,6 +236,49 @@ class RoundWinnerTrainer:
         if not self.extractor or not self.lgb_model:
             raise RuntimeError("Trainer must be fitted before running stress tests.")
 
+        is_set18 = any(c.startswith("DA_") or "18" in c for c in self.extractor.champions_vocab_)
+
+        if is_set18:
+            tank = "DA_18_Ornn"
+            carry = "DA_18_Xayah"
+            fodder = "DA_18_Camille"
+            carry_i1 = "DA_InfinityEdge"
+            carry_i2 = "DA_LastWhisper"
+            carry_i3 = "DA_GuinsoosRageblade"
+            tank_i1 = "DA_WarmogsArmor"
+            tank_i2 = "DA_GargoyleStoneplate"
+            tank_i3 = "DA_DragonsClaw"
+            opp_units = [
+                {"unit": "DA_18_Yorick", "tier": 2, "loc": "A1", "items": [tank_i1, tank_i2, tank_i3]},
+                {"unit": "DA_18_Rakan", "tier": 2, "loc": "A2", "items": []},
+                {"unit": "DA_18_Diana", "tier": 2, "loc": "A3", "items": []},
+                {"unit": "DA_18_Hecarim", "tier": 2, "loc": "A4", "items": []},
+                {"unit": "DA_18_Xayah", "tier": 2, "loc": "D1", "items": [carry_i1, carry_i2, carry_i3]},
+                {"unit": "DA_Karma18", "tier": 2, "loc": "D2", "items": []},
+                {"unit": "DA_Vi18", "tier": 2, "loc": "D3", "items": []},
+                {"unit": "DA_18_Leona", "tier": 2, "loc": "D4", "items": []},
+            ]
+        else:
+            tank = "TFT17_Nasus"
+            carry = "TFT17_Jinx"
+            fodder = "TFT17_Aatrox"
+            carry_i1 = "TFT_Item_InfinityEdge"
+            carry_i2 = "TFT_Item_LastWhisper"
+            carry_i3 = "TFT_Item_GuinsoosRageblade"
+            tank_i1 = "TFT_Item_WarmogsArmor"
+            tank_i2 = "TFT_Item_GargoyleStoneplate"
+            tank_i3 = "TFT_Item_DragonsClaw"
+            opp_units = [
+                {"unit": "TFT17_Nasus", "tier": 2, "loc": "A1", "items": [tank_i1, tank_i2, tank_i3]},
+                {"unit": "TFT17_Maokai", "tier": 2, "loc": "A2", "items": []},
+                {"unit": "TFT17_Illaoi", "tier": 2, "loc": "A3", "items": []},
+                {"unit": "TFT17_Poppy", "tier": 2, "loc": "A4", "items": []},
+                {"unit": "TFT17_Jinx", "tier": 2, "loc": "D1", "items": [carry_i1, carry_i2, carry_i3]},
+                {"unit": "TFT17_Caitlyn", "tier": 2, "loc": "D2", "items": []},
+                {"unit": "TFT17_Kindred", "tier": 2, "loc": "D3", "items": []},
+                {"unit": "TFT17_Corki", "tier": 2, "loc": "D4", "items": []},
+            ]
+
         scenarios = [
             (
                 "Greedy Banker (200g + 1 unit vs 0g + 8 units)",
@@ -245,17 +292,8 @@ class RoundWinnerTrainer:
                     "focal_gold": 200,
                     "opponent_gold": 0,
                     "input_state_json": json.dumps({
-                        "focal_board": [{"unit": "TFT17_Aatrox", "tier": 1, "loc": "A1", "items": []}],
-                        "opponent_board": [
-                            {"unit": "TFT17_Nasus", "tier": 2, "loc": "A1", "items": ["TFT_Item_WarmogsArmor", "TFT_Item_GargoyleStoneplate", "TFT_Item_DragonsClaw"]},
-                            {"unit": "TFT17_Maokai", "tier": 2, "loc": "A2", "items": []},
-                            {"unit": "TFT17_Illaoi", "tier": 2, "loc": "A3", "items": []},
-                            {"unit": "TFT17_Poppy", "tier": 2, "loc": "A4", "items": []},
-                            {"unit": "TFT17_Jinx", "tier": 2, "loc": "D1", "items": ["TFT_Item_InfinityEdge", "TFT_Item_LastWhisper", "TFT_Item_GuinsoosRageblade"]},
-                            {"unit": "TFT17_Caitlyn", "tier": 2, "loc": "D2", "items": []},
-                            {"unit": "TFT17_Kindred", "tier": 2, "loc": "D3", "items": []},
-                            {"unit": "TFT17_Corki", "tier": 2, "loc": "D4", "items": []},
-                        ],
+                        "focal_board": [{"unit": fodder, "tier": 1, "loc": "A1", "items": []}],
+                        "opponent_board": opp_units,
                     }),
                 },
                 lambda p: p < 0.10,
@@ -273,22 +311,22 @@ class RoundWinnerTrainer:
                     "opponent_gold": 20,
                     "input_state_json": json.dumps({
                         "focal_board": [
-                            {"unit": "TFT17_Nasus", "tier": 2, "loc": "A1", "items": ["TFT_Item_WarmogsArmor", "TFT_Item_GargoyleStoneplate"]},
-                            {"unit": "TFT17_Jinx", "tier": 2, "loc": "D1", "items": ["TFT_Item_InfinityEdge", "TFT_Item_LastWhisper", "TFT_Item_GuinsoosRageblade"]},
-                            {"unit": "TFT17_Caitlyn", "tier": 2, "loc": "D2", "items": []},
-                            {"unit": "TFT17_Maokai", "tier": 2, "loc": "A2", "items": []},
-                            {"unit": "TFT17_Illaoi", "tier": 2, "loc": "A3", "items": []},
-                            {"unit": "TFT17_Kindred", "tier": 2, "loc": "D3", "items": []},
-                            {"unit": "TFT17_Corki", "tier": 2, "loc": "D4", "items": []},
-                            {"unit": "TFT17_Poppy", "tier": 2, "loc": "A4", "items": []},
+                            {"unit": tank, "tier": 2, "loc": "A1", "items": [tank_i1, tank_i2]},
+                            {"unit": carry, "tier": 2, "loc": "D1", "items": [carry_i1, carry_i2, carry_i3]},
+                            {"unit": opp_units[1]["unit"], "tier": 2, "loc": "D2", "items": []},
+                            {"unit": opp_units[2]["unit"], "tier": 2, "loc": "A2", "items": []},
+                            {"unit": opp_units[3]["unit"], "tier": 2, "loc": "A3", "items": []},
+                            {"unit": opp_units[5]["unit"], "tier": 2, "loc": "D3", "items": []},
+                            {"unit": opp_units[6]["unit"], "tier": 2, "loc": "D4", "items": []},
+                            {"unit": opp_units[7]["unit"], "tier": 2, "loc": "A4", "items": []},
                         ],
-                        "opponent_board": [{"unit": "TFT17_Aatrox", "tier": 1, "loc": "A1", "items": []}],
+                        "opponent_board": [{"unit": fodder, "tier": 1, "loc": "A1", "items": []}],
                     }),
                 },
                 lambda p: p > 0.80,
             ),
             (
-                "Quality vs Quantity (3-Star 4-Cost Carry vs 8 Naked Units)",
+                "Quality vs Quantity (3-Star Carry vs 8 Naked Units)",
                 "> 80%",
                 {
                     "round_stage": "4-6",
@@ -300,20 +338,14 @@ class RoundWinnerTrainer:
                     "opponent_gold": 10,
                     "input_state_json": json.dumps({
                         "focal_board": [
-                            {"unit": "TFT17_Jinx", "tier": 3, "loc": "D1", "items": ["TFT_Item_InfinityEdge", "TFT_Item_LastWhisper", "TFT_Item_GuinsoosRageblade"]},
-                            {"unit": "TFT17_Nasus", "tier": 2, "loc": "A1", "items": ["TFT_Item_WarmogsArmor"]},
-                            {"unit": "TFT17_Caitlyn", "tier": 2, "loc": "D2", "items": []},
-                            {"unit": "TFT17_Maokai", "tier": 2, "loc": "A2", "items": []},
+                            {"unit": carry, "tier": 3, "loc": "D1", "items": [carry_i1, carry_i2, carry_i3]},
+                            {"unit": tank, "tier": 2, "loc": "A1", "items": [tank_i1]},
+                            {"unit": opp_units[1]["unit"], "tier": 2, "loc": "D2", "items": []},
+                            {"unit": opp_units[2]["unit"], "tier": 2, "loc": "A2", "items": []},
                         ],
                         "opponent_board": [
-                            {"unit": "TFT17_Aatrox", "tier": 2, "loc": "A1", "items": []},
-                            {"unit": "TFT17_Pantheon", "tier": 2, "loc": "A2", "items": []},
-                            {"unit": "TFT17_Briar", "tier": 2, "loc": "A3", "items": []},
-                            {"unit": "TFT17_RekSai", "tier": 2, "loc": "A4", "items": []},
-                            {"unit": "TFT17_Gragas", "tier": 2, "loc": "B1", "items": []},
-                            {"unit": "TFT17_Nunu", "tier": 2, "loc": "B2", "items": []},
-                            {"unit": "TFT17_Urgot", "tier": 2, "loc": "B3", "items": []},
-                            {"unit": "TFT17_Chogath", "tier": 2, "loc": "B4", "items": []},
+                            {"unit": opp_units[i]["unit"], "tier": 2, "loc": f"A{i+1}" if i < 4 else f"B{i-3}", "items": []}
+                            for i in range(8)
                         ],
                     }),
                 },
@@ -340,7 +372,12 @@ class RoundWinnerTrainer:
 
         return results
 
-    def save(self, output_dir: Path | str, model_filename: str = "round_winner_model.joblib") -> Path:
+    def save(
+        self,
+        output_dir: Path | str,
+        model_filename: str = "round_winner_model.joblib",
+        metadata_filename: str = "metadata.json",
+    ) -> Path:
         """Serialize model artifacts and metadata JSON."""
         out_dir = Path(output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -358,7 +395,7 @@ class RoundWinnerTrainer:
         save_path = out_dir / model_filename
         joblib.dump(bundle, save_path, compress=3)
 
-        meta_path = out_dir / "metadata.json"
+        meta_path = out_dir / metadata_filename
         with meta_path.open("w", encoding="utf-8") as f:
             json.dump(self.metadata_, f, indent=2)
 

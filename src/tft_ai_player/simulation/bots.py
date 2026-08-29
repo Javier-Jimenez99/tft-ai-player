@@ -66,10 +66,19 @@ class StandardTempoBot:
                 if not player.buy_exp():
                     break
 
-        # 2. Buy shop units that upgrade current units or match traits
+        # 2. Spend free rerolls from augments/traits
+        while player.free_rerolls > 0:
+            if not player.reroll_shop(pool, rng=r):
+                break
+            self._buy_shop_units(player, pool, set_data, stage)
+
+        # 3. Buy shop units that upgrade current units or match traits
         self._buy_shop_units(player, pool, set_data, stage)
 
-        # 3. Roll Down Gold if in danger (HP <= 35) or surplus gold at Level 8+
+        # 4. Use Consumables (Duplicators, Reforgers, Removers)
+        self._use_consumables(player, pool, set_data, rng=r)
+
+        # 5. Roll Down Gold if in danger (HP <= 35) or surplus gold at Level 8+
         is_danger = player.health <= 35
         min_gold_threshold = 10 if is_danger else 50
         max_rerolls = 6 if is_danger else 2
@@ -77,20 +86,43 @@ class StandardTempoBot:
         if (is_danger or player.level >= 8) and player.gold > min_gold_threshold:
             rerolls = 0
             while player.gold >= min_gold_threshold + set_data.reroll_cost and rerolls < max_rerolls:
-                if not player.reroll_shop(pool):
+                if not player.reroll_shop(pool, rng=r):
                     break
                 rerolls += 1
                 self._buy_shop_units(player, pool, set_data, stage)
 
-        # 4. Ensure Board is at Maximum Capacity
+        # 6. Ensure Board is at Maximum Capacity
         self._fill_board_capacity(player, set_data)
 
-        # 5. Item Equipping
+        # 7. Item Equipping
         self._equip_items_intelligently(player, set_data)
 
-        # 6. Bench cleanup if bench is overflowing
+        # 8. Bench cleanup if bench is overflowing
         if player.free_bench_slots == 0:
             self._sell_lowest_priority_bench_unit(player, pool, set_data)
+
+    def _use_consumables(self, player: Player, pool: ChampionPool, set_data: SetData, rng: random.Random | None = None) -> None:
+        """Intelligently apply Champion Duplicators and Reforgers."""
+        # Use Duplicators on 2-star 4-costs or 5-costs to accelerate upgrades
+        if player.duplicators > 0:
+            candidates = [
+                (True, pos, u) for pos, u in player.board.items()
+                if u.cost >= 4 and u.star_level >= 1
+            ]
+            if not candidates:
+                candidates = [
+                    (False, idx, u) for idx, u in enumerate(player.bench)
+                    if u is not None and u.cost >= 3
+                ]
+            if candidates:
+                # Pick highest cost unit
+                candidates.sort(key=lambda item: (item[2].cost, item[2].star_level), reverse=True)
+                is_board, loc, _ = candidates[0]
+                player.use_duplicator(is_board=is_board, loc=loc, pool=pool)
+
+        # Use Reforgers if holding duplicate non-fitting components
+        if player.reforgers > 0 and len(player.item_bench) >= 4:
+            player.use_reforger(item_bench_idx=0, rng=rng)
 
     def _buy_shop_units(self, player: Player, pool: ChampionPool, set_data: SetData, stage: int) -> None:
         """Evaluate and buy beneficial champions from the current shop."""

@@ -43,11 +43,11 @@ def test_set17_champions_match_model_features() -> None:
 
     assert len(profile.champions) == 63
 
-    # All champions in model feature extractor exist in Set 17 profile with identical costs
-    for champ_id, expected_cost in CHAMP_BASE_COSTS.items():
-        assert champ_id in champ_map, f"Missing champion {champ_id} in Set 17 profile"
-        assert champ_map[champ_id].cost == expected_cost, f"Cost mismatch for {champ_id}"
-        assert champ_map[champ_id].name != ""
+    # All Set 17 champions exist in model feature extractor with identical costs
+    for champ in profile.champions:
+        assert champ.champion_id in CHAMP_BASE_COSTS, f"Missing champion {champ.champion_id} in CHAMP_BASE_COSTS"
+        assert CHAMP_BASE_COSTS[champ.champion_id] == champ.cost, f"Cost mismatch for {champ.champion_id}"
+        assert champ.name != ""
 
     # All traits have valid thresholds and member champions
     for trait_id, expected_members in SET17_TRAIT_CHAMPIONS.items():

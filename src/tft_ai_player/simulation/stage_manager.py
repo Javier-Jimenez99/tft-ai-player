@@ -6,8 +6,10 @@ import random
 from dataclasses import dataclass
 from enum import StrEnum
 
+from tft_ai_player.simulation.augments import AugmentDef, AugmentManager
 from tft_ai_player.simulation.config import STANDARD_COMPONENTS, SetData
 from tft_ai_player.simulation.models import ChampionInstance, ChampionPool, Player
+from tft_ai_player.simulation.sets.set18.mechanics import Set18MechanicsHandler
 
 
 class RoundType(StrEnum):
@@ -55,10 +57,11 @@ class RoundInfo:
 
 
 class StageManager:
-    """Orchestrates TFT round transitions, income, PvE drops, and carousels."""
+    """Orchestrates TFT round transitions, income, PvE drops, carousels, and augment/loot events."""
 
-    def __init__(self, set_data: SetData) -> None:
+    def __init__(self, set_data: SetData, augment_manager: AugmentManager | None = None) -> None:
         self.set_data = set_data
+        self.augment_manager: AugmentManager = augment_manager or AugmentManager()
         self.stage: int = 1
         self.round_in_stage: int = 1
         self.total_rounds_elapsed: int = 0
@@ -127,9 +130,31 @@ class StageManager:
         pool: ChampionPool,
         rng: random.Random | None = None,
     ) -> None:
-        """Apply passive XP, income (base + interest + streak), and shop refresh."""
+        """Apply augment offerings, passive XP/income, trait mechanics, and shop refreshes."""
+        r = rng or random
         rinfo = self.get_current_round_info()
         base_gold = self.get_passive_gold(rinfo.stage_str)
+
+        # 0. Augment Selection Round (2-1, 3-2, 4-2)
+        if self.augment_manager.is_augment_round(rinfo.stage_str):
+            for player in players:
+                if not player.alive:
+                    continue
+                choices = self.augment_manager.generate_augment_choices(
+                    player, rinfo.stage_str, rng=r
+                )
+                if choices:
+                    active_traits = set(player.get_active_traits().keys())
+                    best_choice = choices[0]
+                    for c in choices:
+                        if any(t in active_traits for t in c.associated_traits):
+                            best_choice = c
+                            break
+                        if player.gold < 30 and c.instant_gold > best_choice.instant_gold:
+                            best_choice = c
+                    self.augment_manager.apply_augment(
+                        player, best_choice.augment_id, pool=pool, set_data=self.set_data, rng=r
+                    )
 
         for player in players:
             if not player.alive:
@@ -146,14 +171,54 @@ class StageManager:
                     else:
                         break
 
-            # 2. Gold Income
+            # 2. Augment Passive Income & Per-Round XP
+            self.augment_manager.execute_round_start_augments(player, self.set_data)
+
+            # 3. Set-Specific Trait Round-Start Mechanics
+            candidates_pool: list[str] | None = None
+            if "18" in self.set_data.set_name:
+                candidates_pool = Set18MechanicsHandler.apply_round_start(
+                    player=player,
+                    set_data=self.set_data,
+                    pool=pool,
+                    rng=r,
+                )
+
+            # 4. Standard Gold Income (Base + Interest + Streak)
             interest_gold = player.calculate_interest_gold()
             streak_gold = player.calculate_streak_gold()
             total_income = base_gold + interest_gold + streak_gold
             player.add_gold(total_income)
 
-            # 3. Shop Refresh (if not locked)
-            player.shop.refresh(player.level, pool, self.set_data, rng=rng)
+            # 5. Shop Refresh
+            player.shop.refresh(
+                level=player.level,
+                pool=pool,
+                set_data=self.set_data,
+                rng=r,
+                ignited_slots=player.ignited_shop_slots,
+                candidates_pool=candidates_pool,
+            )
+            player.ignited_shop_slots = []  # Consumed
+
+    def handle_combat_loot_and_traits(
+        self,
+        players: list[Player],
+        combat_results: list[Any],
+        pool: ChampionPool,
+        rng: random.Random | None = None,
+    ) -> None:
+        """Resolve set-specific combat loot, takedown bounties, and essence."""
+        r = rng or random
+
+        if "18" in self.set_data.set_name:
+            Set18MechanicsHandler.apply_combat_loot_and_traits(
+                players=players,
+                combat_results=combat_results,
+                pool=pool,
+                set_data=self.set_data,
+                rng=r,
+            )
 
     def handle_pve_loot(
         self,
