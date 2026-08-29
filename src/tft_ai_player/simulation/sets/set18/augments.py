@@ -74,7 +74,7 @@ SET18_AUGMENTS_CATALOG: dict[str, AugmentDef] = {
         tier=AugmentTier.SILVER,
         category=AugmentCategory.ECONOMY,
         description="You cannot perform actions for the next 3 rounds. Afterwards, gain 18 gold.",
-        instant_gold=18,
+        instant_gold=0,
     ),
     "DA_18_CareTakerAlly": AugmentDef(
         augment_id="DA_18_CareTakerAlly",

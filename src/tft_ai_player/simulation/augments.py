@@ -81,17 +81,9 @@ class AugmentManager:
         """True if the given stage string is a standard augment offering round."""
         return stage_str in self.AUGMENT_STAGES
 
-    def generate_augment_choices(
-        self,
-        player: Player,
-        stage_str: str,
-        rng: random.Random | None = None,
-        k: int = 3,
-    ) -> list[AugmentDef]:
-        """Sample k distinct augment candidates for a player."""
+    def get_round_augment_tier(self, stage_str: str, rng: random.Random | None = None) -> AugmentTier:
+        """Determine global lobby augment tier for a given stage."""
         r = rng or random
-
-        # Determine target tier based on stage schedule
         if stage_str == "2-1":
             tier_weights = (0.50, 0.40, 0.10)
         elif stage_str == "3-2":
@@ -99,13 +91,25 @@ class AugmentManager:
         else:  # 4-2
             tier_weights = (0.15, 0.55, 0.30)
 
-        target_tier = r.choices(
+        return r.choices(
             [AugmentTier.SILVER, AugmentTier.GOLD, AugmentTier.PRISMATIC],
             weights=tier_weights,
             k=1,
         )[0]
 
-        candidates = [a for a in self.by_tier[target_tier] if a.augment_id not in player.augments]
+    def generate_augment_choices(
+        self,
+        player: Player,
+        stage_str: str,
+        rng: random.Random | None = None,
+        k: int = 3,
+        target_tier: AugmentTier | None = None,
+    ) -> list[AugmentDef]:
+        """Sample k distinct augment candidates for a player of the specified tier."""
+        r = rng or random
+
+        tier = target_tier or self.get_round_augment_tier(stage_str, r)
+        candidates = [a for a in self.by_tier[tier] if a.augment_id not in player.augments]
         if len(candidates) < k:
             candidates = [a for a in self.catalog.values() if a.augment_id not in player.augments]
 

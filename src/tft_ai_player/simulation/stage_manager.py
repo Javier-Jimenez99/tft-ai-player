@@ -137,11 +137,12 @@ class StageManager:
 
         # 0. Augment Selection Round (2-1, 3-2, 4-2)
         if self.augment_manager.is_augment_round(rinfo.stage_str):
+            lobby_tier = self.augment_manager.get_round_augment_tier(rinfo.stage_str, rng=r)
             for player in players:
                 if not player.alive:
                     continue
                 choices = self.augment_manager.generate_augment_choices(
-                    player, rinfo.stage_str, rng=r
+                    player, rinfo.stage_str, rng=r, target_tier=lobby_tier
                 )
                 if choices:
                     active_traits = set(player.get_active_traits().keys())
@@ -150,7 +151,7 @@ class StageManager:
                         if any(t in active_traits for t in c.associated_traits):
                             best_choice = c
                             break
-                        if player.gold < 30 and c.instant_gold > best_choice.instant_gold:
+                        if c.instant_gold > best_choice.instant_gold:
                             best_choice = c
                     self.augment_manager.apply_augment(
                         player, best_choice.augment_id, pool=pool, set_data=self.set_data, rng=r

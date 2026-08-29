@@ -67,6 +67,16 @@ class GameRecorder:
                 for idx, card in enumerate(p.shop.slots)
             ]
 
+            augments_data = [
+                {
+                    "augment_id": aug_id,
+                    "name": self.game.stage_manager.augment_manager.catalog[aug_id].name if aug_id in self.game.stage_manager.augment_manager.catalog else aug_id,
+                    "tier": self.game.stage_manager.augment_manager.catalog[aug_id].tier.value if aug_id in self.game.stage_manager.augment_manager.catalog else "GOLD",
+                    "description": self.game.stage_manager.augment_manager.catalog[aug_id].description if aug_id in self.game.stage_manager.augment_manager.catalog else "",
+                }
+                for aug_id in p.augments
+            ]
+
             players_data.append({
                 "player_id": p.player_id,
                 "name": p.name,
@@ -80,6 +90,7 @@ class GameRecorder:
                 "placement": p.placement,
                 "board_value": p.get_board_value(),
                 "active_traits": p.get_active_traits(),
+                "augments": augments_data,
                 "board": board_units,
                 "bench": bench_units,
                 "item_bench": item_bench_data,
@@ -700,6 +711,11 @@ body {{
           <div class="chip">🔥 Streak <span id="scout-streak">0</span></div>
           <div class="chip">💎 Board Value: <span id="scout-board-val">0</span>g</div>
         </div>
+
+        <div class="augments-panel" style="margin-top: 10px; background: rgba(15, 23, 42, 0.5); border: 1px solid var(--border-color); border-radius: 12px; padding: 10px 14px;">
+          <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); font-weight: 700; margin-bottom: 6px;">⚡ Chosen Augments</div>
+          <div id="scout-augments-list" style="display: flex; flex-wrap: wrap; gap: 8px;"></div>
+        </div>
       </div>
 
       <!-- Hex Board (4x7) -->
@@ -775,6 +791,11 @@ function renderFrame(idx) {{
     const hpColor = hpPercent > 50 ? 'var(--accent-green)' : (hpPercent > 20 ? 'var(--accent-gold)' : 'var(--accent-red)');
     const rankPill = p.alive ? `<span class="rank-pill rank-top4">Rank #1</span>` : `<span class="rank-pill" style="background: rgba(239,68,68,0.2); color:#f87171;">#${{p.placement}}</span>`;
 
+    const augPills = (p.augments || []).map(a => {{
+      const color = a.tier === 'SILVER' ? '#94a3b8' : (a.tier === 'PRISMATIC' ? '#c084fc' : '#fbbf24');
+      return `<span style="font-size: 0.65rem; padding: 1px 5px; border-radius: 4px; background: rgba(0,0,0,0.6); border: 1px solid ${{color}}; color: ${{color}}; font-weight: 600;" title="${{a.name}}">${{a.name}}</span>`;
+    }}).join(" ");
+
     card.innerHTML = `
       <div class="card-top">
         <div class="player-badge">
@@ -791,6 +812,7 @@ function renderFrame(idx) {{
         <span>⭐ Lv ${{p.level}}</span>
         <span>♟️ ${{p.board.length}}u (${{p.board_value}}g)</span>
       </div>
+      ${{p.augments && p.augments.length > 0 ? `<div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:6px;">${{augPills}}</div>` : ''}}
     `;
     playerListEl.appendChild(card);
   }});
@@ -806,6 +828,27 @@ function renderFrame(idx) {{
   document.getElementById("scout-xp").textContent = `${{scouted.exp}}/${{scouted.max_exp || 'MAX'}}`;
   document.getElementById("scout-streak").textContent = scouted.streak >= 0 ? `+${{scouted.streak}}` : scouted.streak;
   document.getElementById("scout-board-val").textContent = scouted.board_value;
+
+  // Render Scouted Player Augments
+  const augsListEl = document.getElementById("scout-augments-list");
+  augsListEl.innerHTML = "";
+  if (scouted.augments && scouted.augments.length > 0) {{
+    scouted.augments.forEach(a => {{
+      const color = a.tier === 'SILVER' ? '#94a3b8' : (a.tier === 'PRISMATIC' ? '#c084fc' : '#fbbf24');
+      const chip = document.createElement("div");
+      chip.style.cssText = `background: rgba(0,0,0,0.5); border: 1px solid ${{color}}; border-left: 4px solid ${{color}}; padding: 6px 10px; border-radius: 8px; font-size: 0.78rem; display: flex; flex-direction: column; gap: 2px; flex: 1 1 200px;`;
+      chip.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <strong style="color: ${{color}}; font-size: 0.82rem;">${{a.name}}</strong>
+          <span style="font-size: 0.68rem; padding: 1px 6px; border-radius: 4px; background: rgba(255,255,255,0.08); color: ${{color}}; font-weight: 700;">${{a.tier}}</span>
+        </div>
+        <div style="color: var(--text-muted); font-size: 0.73rem; line-height: 1.2;">${{a.description}}</div>
+      `;
+      augsListEl.appendChild(chip);
+    }});
+  }} else {{
+    augsListEl.innerHTML = `<span style="font-size: 0.78rem; color: var(--text-muted); font-style: italic;">No augments selected yet (Selection rounds at 2-1, 3-2, 4-2).</span>`;
+  }}
 
   // Board (4x7)
   const boardGridEl = document.getElementById("board-grid");
