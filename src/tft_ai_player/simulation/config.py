@@ -88,6 +88,11 @@ class SetData:
         item_def = self.items.get(item_id)
         return item_def.is_component if item_def else False
 
+    @property
+    def components(self) -> list[str]:
+        """List of all component item IDs in this set."""
+        return [k for k, v in self.items.items() if v.is_component]
+
 
 TEAM_SIZE_EXPANDING_ITEMS: frozenset[str] = frozenset([
     "TFT_Item_TacticiansCrown",

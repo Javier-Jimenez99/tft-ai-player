@@ -12,73 +12,179 @@ import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 
 # =============================================================================
-# SET 17 DOMAIN KNOWLEDGE: COSTS, TRAITS, ROLES, ITEMS (OFFICIAL COMMUNITYDRAGON)
+# SET 17 & SET 18 DOMAIN KNOWLEDGE: COSTS, TRAITS, ROLES, ITEMS (COMMUNITYDRAGON)
 # =============================================================================
 from tft_ai_player.simulation.config import UnitRole
 from tft_ai_player.simulation.sets.set17 import (
     SET17_CHAMPION_CATALOG,
     SET17_TRAIT_CATALOG,
 )
+from tft_ai_player.simulation.sets.set18 import (
+    SET18_CHAMPION_CATALOG,
+    SET18_TRAIT_CATALOG,
+)
 
-CHAMP_BASE_COSTS: dict[str, int] = {
-    c.champion_id: c.cost for c in SET17_CHAMPION_CATALOG
+# Unified catalogs
+CHAMP_BASE_COSTS: dict[str, int] = {}
+AP_CARRIES: set[str] = set()
+AD_CARRIES: set[str] = set()
+MAIN_TANKS: set[str] = set()
+CHAMP_TO_TRAITS: dict[str, list[str]] = {}
+
+# Populate standard entries from Set 17 and Set 18 catalogs
+for cat in [SET17_CHAMPION_CATALOG, SET18_CHAMPION_CATALOG]:
+    for c in cat:
+        cid = c.champion_id
+        cname = c.name
+        cost = c.cost
+        traits = list(c.traits)
+        role = c.role
+
+        CHAMP_BASE_COSTS[cid] = cost
+        CHAMP_BASE_COSTS[cname] = cost
+        CHAMP_TO_TRAITS[cid] = traits
+        CHAMP_TO_TRAITS[cname] = traits
+
+        if role == UnitRole.AP_CARRY:
+            AP_CARRIES.add(cid)
+            AP_CARRIES.add(cname)
+        elif role == UnitRole.AD_CARRY:
+            AD_CARRIES.add(cid)
+            AD_CARRIES.add(cname)
+        elif role == UnitRole.TANK:
+            MAIN_TANKS.add(cid)
+            MAIN_TANKS.add(cname)
+
+# Generate aliases for DA_... formats in Set 18 datasets
+for c in SET18_CHAMPION_CATALOG:
+    clean_name = c.champion_id.replace("TFT18_", "")
+    aliases = [
+        f"DA_18_{clean_name}",
+        f"DA_{clean_name}18",
+        f"DA_{clean_name}",
+        f"DA_18_{clean_name}_AD",
+        f"DA_18_{clean_name}_AP",
+        f"DA_{clean_name}18_AD",
+        f"DA_{clean_name}18_AP",
+    ]
+    for a in aliases:
+        CHAMP_BASE_COSTS[a] = c.cost
+        CHAMP_TO_TRAITS[a] = list(c.traits)
+        if c.role == UnitRole.AP_CARRY:
+            AP_CARRIES.add(a)
+        elif c.role == UnitRole.AD_CARRY:
+            AD_CARRIES.add(a)
+        elif c.role == UnitRole.TANK:
+            MAIN_TANKS.add(a)
+
+# Special alias overrides for Set 18 dataset tokens
+_SET18_SPECIAL_ALIASES: dict[str, tuple[str, int, list[str], UnitRole]] = {
+    "DA_Sentinel18": ("TFT18_AncientSentinel", 4, ["Riftbeast", "Vanguard"], UnitRole.TANK),
+    "DA_18_Sentry": ("TFT18_AncientSentinel", 4, ["Riftbeast", "Vanguard"], UnitRole.TANK),
+    "DA_CrimsonRaptor18": ("TFT18_Raptor", 3, ["Riftbeast", "Rapidfire"], UnitRole.AD_CARRY),
+    "DA_18_GnarSmall": ("TFT18_Gnar", 5, ["Monolith", "Primal"], UnitRole.TANK),
+    "DA_18_GnarBig": ("TFT18_Gnar", 5, ["Monolith", "Primal"], UnitRole.TANK),
+    "DA_Elderwood18_StonebarkTree": ("TFT18_Maokai", 5, ["Elderwood", "Defender"], UnitRole.TANK),
+    "DA_Elderwood18_Lifeblossom": ("TFT18_Maokai", 5, ["Elderwood", "Defender"], UnitRole.TANK),
+    "DA_Elderwood18_Protector": ("TFT18_Maokai", 5, ["Elderwood", "Defender"], UnitRole.TANK),
+    "DA_18_ElderDragon": ("TFT18_ElderDragon", 5, ["Apex Predator", "Riftbeast"], UnitRole.AD_CARRY),
+    "DA_18_RekSai": ("TFT18_RekSai", 1, ["Blackthorn", "Brawler"], UnitRole.TANK),
+    "DA_18_KhaZix": ("TFT18_KhaZix", 3, ["Primal", "Executioner"], UnitRole.AD_CARRY),
 }
 
-AP_CARRIES: set[str] = {
-    c.champion_id for c in SET17_CHAMPION_CATALOG if c.role == UnitRole.AP_CARRY
-}
+for a, (cid, cost, traits, role) in _SET18_SPECIAL_ALIASES.items():
+    CHAMP_BASE_COSTS[a] = cost
+    CHAMP_TO_TRAITS[a] = traits
+    if role == UnitRole.AP_CARRY:
+        AP_CARRIES.add(a)
+    elif role == UnitRole.AD_CARRY:
+        AD_CARRIES.add(a)
+    elif role == UnitRole.TANK:
+        MAIN_TANKS.add(a)
 
-AD_CARRIES: set[str] = {
-    c.champion_id for c in SET17_CHAMPION_CATALOG if c.role == UnitRole.AD_CARRY
-}
+_AP_KEYWORDS = {"jeweledgauntlet", "rabadonsdeathcap", "archangelsstaff", "hextechgunblade", "crownguard", "statikkshiv", "morellonomicon", "leviathan", "voidstaff", "nashorstooth", "lichbane", "blightingjewel", "ludenstempest"}
+_AD_KEYWORDS = {"infinityedge", "deathblade", "lastwhisper", "krakenslayer", "krakensfury", "steraksgage", "bloodthirster", "guinsoosrageblade", "rapidfirecannon", "madredsbloodrazor", "giantslayer", "edgeofnight", "strikersflail", "fishbones", "navoriflickerblade"}
+_TANK_KEYWORDS = {"gargoylestoneplate", "warmogsarmor", "frozenheart", "dragonsclaw", "bramblevest", "nightharvester", "spiritvisage", "protectorsvow", "steadfastheart", "theindomitable", "aegisofdawn", "aegisofdusk"}
+_ANTI_HEAL_KEYWORDS = {"morellonomicon", "redbuff", "sunfirecape"}
+_SHRED_KEYWORDS = {"lastwhisper", "statikkshiv", "ionicspark", "evenshroud", "voidstaff"}
+_MANA_KEYWORDS = {"spearofshojin", "bluebuff", "adaptivehelm", "manazane"}
 
-MAIN_TANKS: set[str] = {
-    c.champion_id for c in SET17_CHAMPION_CATALOG if c.role == UnitRole.TANK
-}
 
+def _item_clean(it: str) -> str:
+    return str(it).lower().replace("_", "").replace("tft", "").replace("da", "").replace("item", "").replace("radiant", "").replace("artifact", "")
+
+
+def is_ap_item(it: str) -> bool:
+    c = _item_clean(it)
+    return any(kw in c for kw in _AP_KEYWORDS)
+
+
+def is_ad_item(it: str) -> bool:
+    c = _item_clean(it)
+    return any(kw in c for kw in _AD_KEYWORDS)
+
+
+def is_tank_item(it: str) -> bool:
+    c = _item_clean(it)
+    return any(kw in c for kw in _TANK_KEYWORDS)
+
+
+def is_anti_heal_item(it: str) -> bool:
+    c = _item_clean(it)
+    return any(kw in c for kw in _ANTI_HEAL_KEYWORDS)
+
+
+def is_shred_item(it: str) -> bool:
+    c = _item_clean(it)
+    return any(kw in c for kw in _SHRED_KEYWORDS)
+
+
+def is_mana_item(it: str) -> bool:
+    c = _item_clean(it)
+    return any(kw in c for kw in _MANA_KEYWORDS)
+
+
+# Backward compatibility sets
 AP_ITEMS: set[str] = {
     "TFT_Item_JeweledGauntlet", "TFT_Item_RabadonsDeathcap", "TFT_Item_ArchangelsStaff",
     "TFT_Item_HextechGunblade", "TFT_Item_Crownguard", "TFT_Item_StatikkShiv",
     "TFT_Item_Morellonomicon", "TFT_Item_Leviathan",
 }
-
 AD_ITEMS: set[str] = {
     "TFT_Item_InfinityEdge", "TFT_Item_Deathblade", "TFT_Item_LastWhisper",
     "TFT_Item_KrakenSlayer", "TFT_Item_SteraksGage", "TFT_Item_Bloodthirster",
     "TFT_Item_GuinsoosRageblade", "TFT_Item_RapidFireCannon", "TFT_Item_MadredsBloodrazor",
 }
-
 TANK_ITEMS: set[str] = {
     "TFT_Item_GargoyleStoneplate", "TFT_Item_WarmogsArmor", "TFT_Item_FrozenHeart",
     "TFT_Item_DragonsClaw", "TFT_Item_BrambleVest", "TFT_Item_RedBuff",
     "TFT_Item_NightHarvester", "TFT_Item_SpiritVisage",
 }
-
 ANTI_HEAL_ITEMS: set[str] = {
     "TFT_Item_Morellonomicon", "TFT_Item_RedBuff", "TFT_Item_SunfireCape",
 }
-
 SHRED_ITEMS: set[str] = {
     "TFT_Item_LastWhisper", "TFT_Item_StatikkShiv", "TFT_Item_IonicSpark", "TFT_Item_Evenshroud",
 }
-
 MANA_ITEMS: set[str] = {
     "TFT_Item_SpearOfShojin", "TFT_Item_BlueBuff", "TFT_Item_AdaptiveHelm",
 }
 
+# Unified Trait mappings
+TRAIT_THRESHOLDS: dict[str, list[int]] = {}
+for t in SET17_TRAIT_CATALOG.values():
+    TRAIT_THRESHOLDS[t.trait_id] = list(t.thresholds)
+for t in SET18_TRAIT_CATALOG.values():
+    TRAIT_THRESHOLDS[t.trait_id] = list(t.thresholds)
+
+ALL_DOMAIN_TRAITS: list[str] = sorted(list(TRAIT_THRESHOLDS.keys()))
+
+# Backward compatibility exports
+ALL_SET17_TRAITS: list[str] = ALL_DOMAIN_TRAITS
+SET17_TRAIT_THRESHOLDS: dict[str, list[int]] = TRAIT_THRESHOLDS
 SET17_TRAIT_CHAMPIONS: dict[str, list[str]] = {
     t.trait_id: list(t.champions) for t in SET17_TRAIT_CATALOG.values()
 }
-
-SET17_TRAIT_THRESHOLDS: dict[str, list[int]] = {
-    t.trait_id: list(t.thresholds) for t in SET17_TRAIT_CATALOG.values()
-}
-
-CHAMP_TO_TRAITS: dict[str, list[str]] = {
-    c.champion_id: list(c.traits) for c in SET17_CHAMPION_CATALOG
-}
-
-ALL_SET17_TRAITS: list[str] = sorted(list(SET17_TRAIT_CATALOG.keys()))
 
 
 class TFTBoardFeatureExtractor(BaseEstimator, TransformerMixin):
@@ -288,23 +394,23 @@ class TFTBoardFeatureExtractor(BaseEstimator, TransformerMixin):
                 is_tank = u_name in MAIN_TANKS
                 n_syn_items = 0
                 for it in items:
-                    if is_ap and it in AP_ITEMS:
+                    if is_ap and (it in AP_ITEMS or is_ap_item(it)):
                         f_synergy_item_score += 1.5
                         n_syn_items += 1
-                    elif is_ad and it in AD_ITEMS:
+                    elif is_ad and (it in AD_ITEMS or is_ad_item(it)):
                         f_synergy_item_score += 1.5
                         n_syn_items += 1
-                    elif is_tank and it in TANK_ITEMS:
+                    elif is_tank and (it in TANK_ITEMS or is_tank_item(it)):
                         f_synergy_item_score += 1.5
                         n_syn_items += 1
                     else:
                         f_synergy_item_score += 0.5
 
-                    if it in ANTI_HEAL_ITEMS:
+                    if it in ANTI_HEAL_ITEMS or is_anti_heal_item(it):
                         f_anti_heal += 1
-                    if it in SHRED_ITEMS:
+                    if it in SHRED_ITEMS or is_shred_item(it):
                         f_shred += 1
-                    if it in MANA_ITEMS:
+                    if it in MANA_ITEMS or is_mana_item(it):
                         f_mana += 1
 
                 u_pow = cost * (tier ** 2.2) * (1.0 + 0.6 * n_items + 0.4 * n_syn_items)
@@ -401,23 +507,23 @@ class TFTBoardFeatureExtractor(BaseEstimator, TransformerMixin):
                 is_tank = u_name in MAIN_TANKS
                 n_syn_items = 0
                 for it in items:
-                    if is_ap and it in AP_ITEMS:
+                    if is_ap and (it in AP_ITEMS or is_ap_item(it)):
                         o_synergy_item_score += 1.5
                         n_syn_items += 1
-                    elif is_ad and it in AD_ITEMS:
+                    elif is_ad and (it in AD_ITEMS or is_ad_item(it)):
                         o_synergy_item_score += 1.5
                         n_syn_items += 1
-                    elif is_tank and it in TANK_ITEMS:
+                    elif is_tank and (it in TANK_ITEMS or is_tank_item(it)):
                         o_synergy_item_score += 1.5
                         n_syn_items += 1
                     else:
                         o_synergy_item_score += 0.5
 
-                    if it in ANTI_HEAL_ITEMS:
+                    if it in ANTI_HEAL_ITEMS or is_anti_heal_item(it):
                         o_anti_heal += 1
-                    if it in SHRED_ITEMS:
+                    if it in SHRED_ITEMS or is_shred_item(it):
                         o_shred += 1
-                    if it in MANA_ITEMS:
+                    if it in MANA_ITEMS or is_mana_item(it):
                         o_mana += 1
 
                 u_pow = cost * (tier ** 2.2) * (1.0 + 0.6 * n_items + 0.4 * n_syn_items)
@@ -805,7 +911,7 @@ class TFTBoardFeatureExtractor(BaseEstimator, TransformerMixin):
         total_stat_power = 0.0
 
         for trait, cnt in counts.items():
-            thresholds = SET17_TRAIT_THRESHOLDS.get(trait, [2, 4, 6])
+            thresholds = TRAIT_THRESHOLDS.get(trait, [2, 4, 6])
             tier = 0.0
             for t_idx, req in enumerate(thresholds, start=1):
                 if cnt >= req:
