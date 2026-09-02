@@ -40,6 +40,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_pretrain_trunk(args)
         if args.command in ("cluster-compositions", "cluster"):
             return _run_cluster_compositions(args)
+        if args.command in ("train-transition", "transition"):
+            return _run_train_transition(args)
     except (MetaTftRequestError, TimelineValidationError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -566,6 +568,137 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="maximum number of curated boards to extract",
+    )
+
+    transition_parser = subcommands.add_parser(
+        "train-transition",
+        aliases=["transition"],
+        help="train the State Transition Predictor in frozen 320D latent space",
+    )
+    transition_parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path(r"D:\tft-winner-data\set18\players"),
+        help="directory containing player CSV files or path to single CSV",
+    )
+    transition_parser.add_argument(
+        "--trunk-checkpoint",
+        type=Path,
+        default=Path("models/trunk/trunk_best.pt"),
+        help="path to pre-trained MultiModalFusionTrunk checkpoint (.pt)",
+    )
+    transition_parser.add_argument(
+        "--output-dir",
+        "-o",
+        type=Path,
+        default=Path("models/transition_predictor"),
+        help="destination directory for transition predictor checkpoints",
+    )
+    transition_parser.add_argument(
+        "--epochs",
+        type=int,
+        default=15,
+        help="number of training epochs (default: 15)",
+    )
+    transition_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=512,
+        help="mini-batch size of transition pairs (default: 512)",
+    )
+    transition_parser.add_argument(
+        "--lr",
+        type=float,
+        default=1e-3,
+        help="AdamW learning rate (default: 1e-3)",
+    )
+    transition_parser.add_argument(
+        "--hidden-dim",
+        type=int,
+        default=512,
+        help="hidden dimension of residual MLP blocks (default: 512)",
+    )
+    transition_parser.add_argument(
+        "--num-layers",
+        type=int,
+        default=3,
+        help="number of residual MLP layers (default: 3)",
+    )
+    transition_parser.add_argument(
+        "--dropout",
+        type=float,
+        default=0.1,
+        help="dropout rate (default: 0.1)",
+    )
+    transition_parser.add_argument(
+        "--lambda-cosine",
+        type=float,
+        default=0.5,
+        help="weight for Cosine Embedding directional loss (default: 0.5)",
+    )
+    transition_parser.add_argument(
+        "--huber-beta",
+        type=float,
+        default=1.0,
+        help="beta threshold for Smooth L1 / Huber loss (default: 1.0)",
+    )
+    transition_parser.add_argument(
+        "--val-split",
+        type=float,
+        default=0.15,
+        help="fraction of matches to reserve for validation (default: 0.15)",
+    )
+    transition_parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=None,
+        help="optional cap on total transition pairs to load",
+    )
+    transition_parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="compute device: 'cpu' or 'cuda' (default: auto)",
+    )
+    transition_parser.add_argument(
+        "--synthetic",
+        action="store_true",
+        help="train on synthetic snapshot transitions for quick testing",
+    )
+    transition_parser.add_argument(
+        "--log-interval",
+        type=int,
+        default=20,
+        help="batch frequency for real-time WandB logging (default: 20)",
+    )
+    transition_parser.add_argument(
+        "--wandb-project",
+        type=str,
+        default="tft-embeddings",
+        help="Weights & Biases project name (default: tft-embeddings)",
+    )
+    transition_parser.add_argument(
+        "--run-name",
+        type=str,
+        default=None,
+        help="custom experiment run name for WandB tracking",
+    )
+    transition_parser.add_argument(
+        "--wandb-entity",
+        type=str,
+        default=None,
+        help="WandB username or team entity name",
+    )
+    transition_parser.add_argument(
+        "--wandb-group",
+        type=str,
+        default="transition-predictor",
+        help="WandB experiment group",
+    )
+    transition_parser.add_argument(
+        "--no-wandb",
+        action="store_true",
+        help="disable WandB cloud logging and run in pure offline mode",
     )
 
     return parser
@@ -1227,7 +1360,113 @@ def _run_cluster_compositions(args: argparse.Namespace) -> int:
     return 0 if "error" not in results else 1
 
 
+def _run_train_transition(args: argparse.Namespace) -> int:
+    import torch
+    from tft_ai_player.embeddings import (
+        ChampionVocabulary,
+        ItemVocabulary,
+        MultiModalFusionTrunk,
+        StateTransitionPredictor,
+        TraitVocabulary,
+        TransitionPredictorTrainer,
+        TransitionTrajectoryDataset,
+        create_synthetic_transition_dataset,
+    )
+
+    print("\n" + "=" * 80)
+    print(" [TFT TRANSITION PREDICTOR] Offline Behavioral Cloning in 320D Latent Space")
+    print("=" * 80)
+
+    device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
+
+    vocab = ChampionVocabulary()
+    item_vocab = ItemVocabulary()
+    trait_vocab = TraitVocabulary()
+
+    # Load frozen trunk
+    trunk_ckpt = Path(args.trunk_checkpoint)
+    if trunk_ckpt.exists():
+        print(f" [+] Loading frozen pre-trained trunk from: {trunk_ckpt.resolve()}")
+        trunk = MultiModalFusionTrunk.load_trunk(trunk_ckpt, map_location=device)
+    else:
+        print(f" [!] Trunk checkpoint not found at '{trunk_ckpt}'. Initializing blank trunk for demonstration.")
+        trunk = MultiModalFusionTrunk(fused_dim=320)
+    trunk.freeze()
+    trunk.eval()
+
+    if args.synthetic or not Path(args.data_dir).exists():
+        if not args.synthetic:
+            print(f"[!] Data directory '{args.data_dir}' not found. Falling back to synthetic dataset.")
+        print(" [+] Generating synthetic transition trajectory dataset...")
+        dataset = create_synthetic_transition_dataset(
+            num_matches=40,
+            rounds_per_match=15,
+            vocab=vocab,
+            item_vocab=item_vocab,
+            trait_vocab=trait_vocab,
+        )
+    else:
+        print(f" [+] Loading transition trajectory dataset from: {args.data_dir}")
+        dataset = TransitionTrajectoryDataset(
+            data_dir=args.data_dir,
+            vocab=vocab,
+            item_vocab=item_vocab,
+            trait_vocab=trait_vocab,
+            max_samples=args.max_samples,
+        )
+
+    print(
+        f" [+] Dataset loaded: {len(dataset)} PVP transition pairs | "
+        f"Vocabs: {len(vocab)} champs, {len(item_vocab)} items, {len(trait_vocab)} traits"
+    )
+
+    if len(dataset) == 0:
+        print(" [!] No valid transition pairs found in dataset.", file=sys.stderr)
+        return 1
+
+    latent_dim = trunk.fused_dim
+    predictor = StateTransitionPredictor(
+        input_dim=latent_dim,
+        hidden_dim=args.hidden_dim,
+        output_dim=latent_dim,
+        num_layers=args.num_layers,
+        dropout=args.dropout,
+        use_residual_delta=True,
+    )
+
+    trainer = TransitionPredictorTrainer(
+        predictor=predictor,
+        trunk=trunk,
+        lr=args.lr,
+        lambda_cosine=args.lambda_cosine,
+        huber_beta=args.huber_beta,
+        log_interval=args.log_interval,
+        use_wandb=not args.no_wandb,
+        wandb_project=args.wandb_project,
+        wandb_run_name=args.run_name,
+        wandb_entity=args.wandb_entity,
+        wandb_group=args.wandb_group,
+        device=device,
+    )
+
+    summary = trainer.fit(
+        dataset=dataset,
+        val_split=args.val_split,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        output_dir=args.output_dir,
+    )
+
+    print("\n" + "=" * 80)
+    print(f" [+] Transition Predictor training completed in {summary['total_time_sec']}s!")
+    print(f"     Best Val Cosine Similarity: {summary['best_val_cosine_similarity']:.4f}")
+    print(f"     Artifacts saved to: {Path(args.output_dir).resolve()}")
+    print("=" * 80 + "\n")
+    return 0
+
+
 if __name__ == "__main__":
     sys.exit(main())
+
 
 

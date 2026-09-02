@@ -36,6 +36,16 @@ from .model import (
     build_hex_geodesic_distance_matrix,
 )
 from .trainer import TrunkPreTrainer
+from .transition import (
+    ResidualMLPBlock,
+    StateTransitionLoss,
+    StateTransitionPredictor,
+    TransitionPredictorTrainer,
+    TransitionTrajectoryDataset,
+    create_synthetic_transition_dataset,
+    extract_latent_transition_pairs,
+    is_valid_pvp_transition,
+)
 from .vocab import ChampionVocabulary, ItemVocabulary, TraitVocabulary
 
 # Backward compatibility aliases
@@ -77,5 +87,14 @@ __all__ = [
     "save_z_index_artifacts",
     "load_z_index",
     "run_clustering_pipeline",
+    "ResidualMLPBlock",
+    "StateTransitionPredictor",
+    "StateTransitionLoss",
+    "TransitionPredictorTrainer",
+    "TransitionTrajectoryDataset",
+    "create_synthetic_transition_dataset",
+    "extract_latent_transition_pairs",
+    "is_valid_pvp_transition",
 ]
+
 
