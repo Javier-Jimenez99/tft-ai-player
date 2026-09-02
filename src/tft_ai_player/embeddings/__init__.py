@@ -1,5 +1,18 @@
 """TFT Multi-Modal Fusion Trunk and Champ2Vec Embeddings Package."""
 
+from .cluster import (
+    ArchetypeProfile,
+    CompositionClusterer,
+    CuratedEndgameBoard,
+    create_synthetic_endgame_dataset,
+    extract_board_latents,
+    load_curated_endgame_snapshots,
+    load_z_index,
+    log_clustering_to_wandb,
+    profile_clusters,
+    run_clustering_pipeline,
+    save_z_index_artifacts,
+)
 from .dataset import (
     SnapshotPairCollate,
     TFTPretrainDataset,
@@ -53,4 +66,16 @@ __all__ = [
     "parse_loc_to_row_col",
     "parse_stage_string",
     "is_pvp_round",
+    "CompositionClusterer",
+    "CuratedEndgameBoard",
+    "ArchetypeProfile",
+    "load_curated_endgame_snapshots",
+    "create_synthetic_endgame_dataset",
+    "extract_board_latents",
+    "profile_clusters",
+    "log_clustering_to_wandb",
+    "save_z_index_artifacts",
+    "load_z_index",
+    "run_clustering_pipeline",
 ]
+

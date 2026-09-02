@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Sequence
@@ -188,15 +189,18 @@ class TraitVocabulary:
 
     def _initialize_defaults(self) -> None:
         try:
-            from tft_ai_player.simulation.sets.set18 import SET18_CHAMPION_CATALOG, SET18_TRAIT_CATALOG
+            from tft_ai_player.simulation.sets.set18.profile import SET18_CHAMPION_CATALOG, SET18_TRAIT_CATALOG
             for trait_name in SET18_TRAIT_CATALOG:
                 self.add_trait(trait_name)
             for c_id, c in SET18_CHAMPION_CATALOG.items():
                 self.register_champ_traits(c_id, c.traits)
                 self.register_champ_traits(c.name, c.traits)
                 clean_name = c_id.replace("TFT18_", "")
+                self.register_champ_traits(clean_name, c.traits)
+                self.register_champ_traits(clean_name.lower(), c.traits)
                 self.register_champ_traits(f"DA_18_{clean_name}", c.traits)
                 self.register_champ_traits(f"DA_{clean_name}18", c.traits)
+                self.register_champ_traits(f"DA_{clean_name}", c.traits)
         except Exception:
             pass
 
@@ -229,15 +233,27 @@ class TraitVocabulary:
             if t:
                 self.add_trait(t)
 
+    def _get_traits_for_champ(self, champ_name: str) -> list[str]:
+        c = champ_name.strip()
+        if c in self.champ_trait_map:
+            return self.champ_trait_map[c]
+        # Try stripping common prefixes and suffixes
+        clean = re.sub(r"^(TFT18_|DA_18_|DA_)", "", c, flags=re.IGNORECASE)
+        clean = re.sub(r"(18|_AP|_Small|_small)$", "", clean)
+        if clean in self.champ_trait_map:
+            return self.champ_trait_map[clean]
+        if clean.lower() in self.champ_trait_map:
+            return self.champ_trait_map[clean.lower()]
+        return []
+
     def compute_trait_vector(self, champ_names: Sequence[str]) -> np.ndarray:
         """Compute active trait synergy counts vector across unique board champions."""
         vec = np.zeros(max(len(self.trait_to_idx), 1), dtype=np.float32)
         unique_champs = set(c.strip() for c in champ_names if c and c.strip() != "<EMPTY>")
 
-        trait_counts = Counter()
+        trait_counts: Counter[str] = Counter()
         for c in unique_champs:
-            mapped_traits = self.champ_trait_map.get(c, [])
-            for t in mapped_traits:
+            for t in self._get_traits_for_champ(c):
                 trait_counts[t] += 1
 
         for trait, count in trait_counts.items():
@@ -246,6 +262,17 @@ class TraitVocabulary:
                 vec[idx] = float(count)
 
         return vec
+
+    def get_active_synergies(self, champ_names: Sequence[str]) -> dict[str, int]:
+        """Compute active trait synergy count dictionary across unique board champions."""
+        unique_champs = set(c.strip() for c in champ_names if c and c.strip() != "<EMPTY>")
+        trait_counts: Counter[str] = Counter()
+        for c in unique_champs:
+            for t in self._get_traits_for_champ(c):
+                trait_counts[t] += 1
+        return dict(trait_counts)
+
+
 
     def __len__(self) -> int:
         return len(self.trait_to_idx)

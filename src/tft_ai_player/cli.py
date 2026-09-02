@@ -38,6 +38,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_rl_league(args)
         if args.command == "pretrain-trunk":
             return _run_pretrain_trunk(args)
+        if args.command in ("cluster-compositions", "cluster"):
+            return _run_cluster_compositions(args)
     except (MetaTftRequestError, TimelineValidationError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -468,6 +470,102 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-wandb",
         action="store_true",
         help="disable WandB cloud logging and run in pure offline mode",
+    )
+
+    cluster_parser = subcommands.add_parser(
+        "cluster-compositions",
+        aliases=["cluster"],
+        help="extract composition archetypes and Z-Index centroids from curated endgame boards",
+    )
+    cluster_parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path(r"D:\tft-winner-data\set18\players"),
+        help="directory containing player CSV files or path to single CSV",
+    )
+    cluster_parser.add_argument(
+        "--trunk-checkpoint",
+        type=Path,
+        default=None,
+        help="path to pre-trained MultiModalFusionTrunk checkpoint (.pt)",
+    )
+    cluster_parser.add_argument(
+        "--output-dir",
+        "-o",
+        type=Path,
+        default=Path("models/clustering"),
+        help="destination directory for Z-Index artifacts and profiles",
+    )
+    cluster_parser.add_argument(
+        "--min-stage",
+        type=int,
+        default=5,
+        help="minimum stage threshold for endgame boards (default: 5)",
+    )
+    cluster_parser.add_argument(
+        "--min-placement",
+        type=int,
+        default=4,
+        help="maximum placement rank to retain (default: 4 for Top 4)",
+    )
+    cluster_parser.add_argument(
+        "--n-clusters",
+        "-k",
+        type=int,
+        default=15,
+        help="number of composition archetypes K to extract (default: 15)",
+    )
+    cluster_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=128,
+        help="mini-batch size for latent extraction (default: 128)",
+    )
+    cluster_parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda",
+        help="PyTorch device (default: cuda if available else cpu)",
+    )
+    cluster_parser.add_argument(
+        "--wandb-project",
+        type=str,
+        default="tft-clustering",
+        help="Weights & Biases project name (default: tft-clustering)",
+    )
+    cluster_parser.add_argument(
+        "--run-name",
+        type=str,
+        default=None,
+        help="custom experiment run name for WandB tracking",
+    )
+    cluster_parser.add_argument(
+        "--wandb-entity",
+        type=str,
+        default=None,
+        help="WandB username or team entity name",
+    )
+    cluster_parser.add_argument(
+        "--wandb-group",
+        type=str,
+        default="clustering-phase2",
+        help="WandB experiment group",
+    )
+    cluster_parser.add_argument(
+        "--no-wandb",
+        action="store_true",
+        help="disable WandB cloud logging and run in pure offline mode",
+    )
+    cluster_parser.add_argument(
+        "--synthetic",
+        action="store_true",
+        help="force usage of realistic synthetic endgame dataset for testing",
+    )
+    cluster_parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=None,
+        help="maximum number of curated boards to extract",
     )
 
     return parser
@@ -1101,6 +1199,35 @@ def _run_pretrain_trunk(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_cluster_compositions(args: argparse.Namespace) -> int:
+    import torch
+    from .embeddings.cluster import run_clustering_pipeline
+
+    device = args.device
+    if device == "cuda" and not torch.cuda.is_available():
+        device = "cpu"
+
+    results = run_clustering_pipeline(
+        data_dir=args.data_dir,
+        trunk_checkpoint=args.trunk_checkpoint,
+        min_stage=args.min_stage,
+        max_placement=args.min_placement,
+        n_clusters=args.n_clusters,
+        batch_size=args.batch_size,
+        device=device,
+        use_wandb=not args.no_wandb,
+        wandb_project=args.wandb_project,
+        run_name=args.run_name,
+        wandb_entity=args.wandb_entity,
+        wandb_group=args.wandb_group,
+        output_dir=args.output_dir,
+        synthetic=args.synthetic,
+        max_samples=args.max_samples,
+    )
+    return 0 if "error" not in results else 1
+
+
 if __name__ == "__main__":
     sys.exit(main())
+
 

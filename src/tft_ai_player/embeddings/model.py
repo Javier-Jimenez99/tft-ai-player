@@ -390,7 +390,7 @@ class MultiModalFusionTrunk(nn.Module):
     @classmethod
     def load_trunk(cls, path: str | Path, map_location: str | torch.device = "cpu") -> MultiModalFusionTrunk:
         checkpoint = torch.load(path, map_location=map_location, weights_only=False)
-        config = checkpoint.get("config", {})
+        config = checkpoint.get("config", {}) if isinstance(checkpoint, dict) else {}
         model = cls(
             num_champs=config.get("num_champs", 500),
             num_items=config.get("num_items", 300),
@@ -400,7 +400,20 @@ class MultiModalFusionTrunk(nn.Module):
             state_feat_dim=config.get("state_feat_dim", 64),
             fused_dim=config.get("fused_dim", 320),
         )
-        model.load_state_dict(checkpoint["state_dict"])
+        if isinstance(checkpoint, dict):
+            if "trunk_state_dict" in checkpoint:
+                model.load_state_dict(checkpoint["trunk_state_dict"])
+            elif "state_dict" in checkpoint:
+                model.load_state_dict(checkpoint["state_dict"])
+            elif "model_state_dict" in checkpoint:
+                sd = checkpoint["model_state_dict"]
+                trunk_sd = {k.replace("trunk.", ""): v for k, v in sd.items() if k.startswith("trunk.")}
+                if trunk_sd:
+                    model.load_state_dict(trunk_sd)
+                else:
+                    model.load_state_dict(sd)
+            else:
+                model.load_state_dict(checkpoint)
         return model
 
 
