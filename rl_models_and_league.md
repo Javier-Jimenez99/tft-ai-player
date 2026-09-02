@@ -72,18 +72,22 @@ The model implemented in [`TFTActorCritic`](../src/tft_ai_player/rl/models/netwo
           └─────────────────────┘           └─────────────────────┘
 ```
 
-### 2.1 Entity Embeddings for Champions & Items
+### 2.1 Entity Embeddings & Unit Synergy Transformer
 Passing champion and item IDs as raw numerical scalars introduces a false ordinal bias (e.g. implying champion #50 is "greater" than champion #12). 
 
-Instead, the network uses trainable dense lookup embeddings:
-- `champ_embedding = nn.Embedding(num_champs + 1, embedding_dim=16)`
-- `item_embedding = nn.Embedding(num_items + 1, embedding_dim=8)`
+Instead, the network uses dense lookup embeddings and a lightweight **Multi-Head Self-Attention (Transformer)** block:
+- `champ_embedding = nn.Embedding(num_champs + 1, embedding_dim=32)`
+- `item_embedding = nn.Embedding(num_items + 1, embedding_dim=32)`
+- `slot_type_embed = nn.Parameter(shape=(1, 4, 32))`
 
-Every unit on the board or bench is encoded as a combined dense vector:
-$$\mathbf{u} = [\mathbf{e}_{\text{champ}} \parallel \text{star} / 3 \parallel \mathbf{e}_{\text{item}_1} \parallel \mathbf{e}_{\text{item}_2} \parallel \mathbf{e}_{\text{item}_3}] \in \mathbb{R}^{16 + 1 + 24} = \mathbb{R}^{41}$$
+For each fielded unit, the champion token and three item tokens are processed via `UnitSynergyTransformer` (`nn.TransformerEncoder` with 4 attention heads):
+$$\mathbf{u}_{\text{tokens}} = \text{SelfAttention}([\mathbf{e}_{\text{champ}} \parallel \mathbf{e}_{\text{item}_1} \parallel \mathbf{e}_{\text{item}_2} \parallel \mathbf{e}_{\text{item}_3}] + \mathbf{e}_{\text{type}})$$
+$$\mathbf{u} = [\text{flatten}(\mathbf{u}_{\text{tokens}}) \parallel \text{star} / 3] \in \mathbb{R}^{4 \times 32 + 1} = \mathbb{R}^{129}$$
+
+This enables non-linear combinatorial item synergies (such as the multiplicative interaction of Infinity Edge and Jeweled Gauntlet on an AP carry) to be explicitly learned before spatial aggregation.
 
 ### 2.2 Spatial Board & Bench Encoders
-- **Board Grid ($4 \times 7 = 28$ hexes)**: Flattened entity embeddings ($28 \times 41 = 1148$) are projected through a two-layer feedforward network with ReLU activations down to a 128-dimensional representation, learning positional synergies (frontline vanguards vs backline carries).
+- **Board Grid ($4 \times 7 = 28$ hexes)**: Contextualized unit representations ($28 \times 129 = 3,612$) are projected through a two-layer feedforward network with ReLU activations down to a 128-dimensional representation, learning positional synergies (frontline vanguards vs backline carries).
 - **Bench (9 slots)**: Projected down to a 64-dimensional feature representation.
 - **Item Bench (10 slots) & Shop (5 slots)**: Processed via entity embeddings and dedicated linear projection layers.
 
@@ -91,70 +95,67 @@ $$\mathbf{u} = [\mathbf{e}_{\text{champ}} \parallel \text{star} / 3 \parallel \m
 There are 7 active opponents in the lobby. If two opponents swap player seat indices, the strategic state is identical. To guarantee permutation invariance, all 7 opponent boards are passed through a shared linear encoder and aggregated via **symmetric mean-pooling**:
 $$\mathbf{h}_{\text{opponents}} = \frac{1}{7} \sum_{k=1}^{7} \text{ReLU}\left(\mathbf{W}_{\text{opp}} \mathbf{u}_{\text{board}}^{(k)} + \mathbf{b}_{\text{opp}}\right)$$
 
-### 2.4 Trunk & Dual Actor-Critic Heads
+### 2.4 Trunk, Recurrent Memory (GRU), & Hierarchical Heads
 1. **Shared Fusion Trunk**:
-   $$\mathbf{z} = \text{MLP}\left(\text{LayerNorm}\left([\mathbf{h}_{\text{board}} \parallel \mathbf{h}_{\text{bench}} \parallel \mathbf{h}_{\text{items}} \parallel \mathbf{h}_{\text{shop}} \parallel \mathbf{h}_{\text{stats}} \parallel \mathbf{h}_{\text{opp\_summary}} \parallel \mathbf{h}_{\text{opponents}}]\right)\right) \in \mathbb{R}^{256}$$
-2. **Actor Head (Policy $\pi_\theta$)**: Linear layer $\mathbf{z} \to \mathbb{R}^{1721}$ producing logits for all discrete micro-actions.
-3. **Critic Head (Value $V_\phi$)**: Linear layer $\mathbf{z} \to \mathbb{R}^{1}$ estimating expected cumulative return and final tournament finish.
+   $$\mathbf{z}_{\text{fusion}} = \text{MLP}\left(\text{LayerNorm}\left([\mathbf{h}_{\text{board}} \parallel \mathbf{h}_{\text{bench}} \parallel \mathbf{h}_{\text{items}} \parallel \mathbf{h}_{\text{shop}} \parallel \mathbf{h}_{\text{stats}} \parallel \mathbf{h}_{\text{opp\_summary}} \parallel \mathbf{h}_{\text{opponents}}]\right)\right) \in \mathbb{R}^{256}$$
+2. **Recurrent Memory Layer (GRU)**: Auto-battlers are Partially Observable Markov Decision Processes (POMDPs). A recurrent layer (`nn.GRU(hidden_dim, hidden_dim)`) updates the hidden state across sequential decision steps, maintaining awareness of opponent gold trajectories, win-streaks, and pivoting intent:
+   $$\mathbf{z}_t, \mathbf{h}_t = \text{GRU}(\mathbf{z}_{\text{fusion}, t}, \mathbf{h}_{t-1})$$
+3. **Hierarchical Actor Head**:
+   - **Type Head**: $\pi_{\text{type}}(c | \mathbf{z}_t) \in \mathbb{R}^{13}$ predicting high-level action categories (PASS, BUY_SHOP, REROLL, BUY_EXP, TOGGLE_LOCK, SELL_BENCH, SELL_BOARD, BENCH_TO_BOARD, BOARD_TO_BENCH, BOARD_TO_BOARD, EQUIP_BOARD, EQUIP_BENCH, COMBINE_ITEMS).
+   - **Argument Head**: $\pi_{\text{arg}}(a | \mathbf{z}_t, c)$ predicting arguments conditioned on sampled type $c$.
+   - **Joint Log-Probability**: $\log \pi(A|s) = \log \pi_{\text{type}}(c|s) + \log \pi_{\text{arg}}(a|s, c)$.
+4. **Critic Head (Value $V_\phi$)**: Linear layer $\mathbf{z}_t \to \mathbb{R}^{1}$ estimating expected cumulative return and final tournament finish.
 
 ---
 
-## 3. Invalid Action Masking (`TOTAL_DISCRETE_ACTIONS = 1721`)
+## 3. Hierarchical Action Space & Invalid Action Masking (`TOTAL_DISCRETE_ACTIONS = 1721`)
 
-TFT features 1,721 discrete micro-actions per step:
-| Action ID Range | Action Type | Description |
-| :--- | :--- | :--- |
-| `0` | PASS | Conclude micro-actions and advance to combat phase |
-| `1 .. 5` | BUY SHOP | Buy champion card in shop slot 0 to 4 |
-| `6` | REROLL SHOP | Refresh shop cards (cost: 2 gold) |
-| `7` | BUY EXP | Purchase 4 experience points (cost: 4 gold) |
-| `8` | TOGGLE LOCK | Lock or unlock shop for next round |
-| `9 .. 17` | SELL BENCH | Sell unit on bench slot 0 to 8 |
-| `18 .. 45` | SELL BOARD | Sell fielded unit on board hex 0 to 27 |
-| `46 .. 297` | BENCH $\to$ BOARD | Move unit from bench slot to board hex ($9 \times 28 = 252$) |
-| `298 .. 549` | BOARD $\to$ BENCH | Move unit from board hex to bench slot ($28 \times 9 = 252$) |
-| `550 .. 1305` | BOARD $\to$ BOARD | Reposition fielded unit between board hexes ($28 \times 27 = 756$) |
-| `1306 .. 1585` | EQUIP $\to$ BOARD | Equip item from item bench to board unit ($10 \times 28 = 280$) |
-| `1586 .. 1675` | EQUIP $\to$ BENCH | Equip item from item bench to bench unit ($10 \times 9 = 90$) |
-| `1676 .. 1720` | COMBINE ITEMS | Combine two component items on item bench ($\binom{10}{2} = 45$) |
-
-### Masked Softmax Implementation
-At any tick, over 95% of actions are illegal. Penalizing illegal actions with negative rewards wastes policy capacity learning rules instead of strategy. 
-
-We use [`MaskedCategorical`](../src/tft_ai_player/rl/models/distributions.py):
-$$\pi(a_i | s) = \frac{\exp(z_i) \cdot m_i}{\sum_{j} \exp(z_j) \cdot m_j}$$
-where $m_i \in \{0, 1\}$ is the boolean validity mask computed dynamically by `get_action_mask()`. Invalid action logits are set to $-\infty$, ensuring an exact probability of **$0.0$** and completely eliminating illegal explorations.
+TFT features 1,721 discrete micro-actions partitioned into 13 macro categories:
+| Action ID Range | Action Type | Choice Count | Description |
+| :--- | :--- | :--- | :--- |
+| `0` | PASS | 1 | Conclude micro-actions and advance to combat phase |
+| `1 .. 5` | BUY SHOP | 5 | Buy champion card in shop slot 0 to 4 |
+| `6` | REROLL SHOP | 1 | Refresh shop cards (cost: 2 gold) |
+| `7` | BUY EXP | 1 | Purchase 4 experience points (cost: 4 gold) |
+| `8` | TOGGLE LOCK | 1 | Lock or unlock shop for next round |
+| `9 .. 17` | SELL BENCH | 9 | Sell unit on bench slot 0 to 8 |
+| `18 .. 45` | SELL BOARD | 28 | Sell fielded unit on board hex 0 to 27 |
+| `46 .. 297` | BENCH $\to$ BOARD | 252 | Move unit from bench slot to board hex ($9 \times 28$) |
+| `298 .. 549` | BOARD $\to$ BENCH | 252 | Move unit from board hex to bench slot ($28 \times 9$) |
+| `550 .. 1305` | BOARD $\to$ BOARD | 756 | Reposition fielded unit between board hexes ($28 \times 27$) |
+| `1306 .. 1585` | EQUIP $\to$ BOARD | 280 | Equip item from item bench to board unit ($10 \times 28$) |
+| `1586 .. 1675` | EQUIP $\to$ BENCH | 90 | Equip item from item bench to bench unit ($10 \times 9$) |
+| `1676 .. 1720` | COMBINE ITEMS | 45 | Combine two component items on item bench ($\binom{10}{2}$) |
 
 ---
 
-## 4. Reinforcement Learning Algorithm: Maskable PPO
+## 4. Reinforcement Learning Algorithm: Maskable PPO with Dynamic Entropy Schedule
 
 The agent is trained using Proximal Policy Optimization (PPO) in [`MaskablePPO`](../src/tft_ai_player/rl/algorithms/ppo.py).
 
 ### 4.1 Generalized Advantage Estimation (GAE-$\lambda$)
-Rollouts are stored in [`RolloutBuffer`](../src/tft_ai_player/rl/algorithms/ppo.py). To reduce variance over multi-stage matches, advantages are calculated using GAE ($\gamma = 0.99, \lambda = 0.95$):
+Rollouts are stored in [`RolloutBuffer`](../src/tft_ai_player/rl/algorithms/ppo.py). Advantages are calculated using GAE ($\gamma = 0.99, \lambda = 0.95$):
 $$\delta_t = r_t + \gamma V(s_{t+1})(1 - d_t) - V(s_t)$$
 $$\hat{A}_t = \sum_{l=0}^{\infty} (\gamma \lambda)^l \delta_{t+l}$$
 
-### 4.2 Clipped Surrogate Objective
-To prevent destabilizing policy shifts, the probability ratio $r_t(\theta) = \frac{\pi_\theta(a_t|s_t)}{\pi_{\theta_{\text{old}}}(a_t|s_t)}$ is clipped within $[1 - \epsilon, 1 + \epsilon]$ ($\epsilon = 0.2$):
-$$L^{\text{CLIP}}(\theta) = \hat{\mathbb{E}}_t \left[ \min\left( r_t(\theta) \hat{A}_t, \, \text{clip}(r_t(\theta), 1 - \epsilon, 1 + \epsilon) \hat{A}_t \right) \right]$$
+### 4.2 Dynamic Entropy Regularization Schedule
+Static entropy regularization causes catastrophic late-stage misplays (e.g. accidentally selling a 2-star carry). The framework implements an exponential decay schedule:
+$$c_2(g) = \max\left(c_{\min}, \, c_{\text{start}} \cdot \gamma_{\text{decay}}^g\right)$$
+- $c_{\text{start}} = 0.05$: High initial exploration across compositions.
+- $c_{\min} = 0.001$: Asymptotic stabilization as the policy masters the meta.
 
 ### 4.3 Total Loss Function
-$$L(\theta, \phi) = -L^{\text{CLIP}}(\theta) + c_1 L^{\text{VF}}(\phi) - c_2 S[\pi_\theta]$$
-- $L^{\text{VF}}(\phi) = \frac{1}{2} (V_\phi(s) - R_t)^2$: Mean squared error critic loss.
-- $S[\pi_\theta]$: Policy entropy regularization bonus ($c_2 = 0.01$) preventing premature collapse to rigid compositions.
+$$L(\theta, \phi) = -L^{\text{CLIP}}(\theta) + c_1 L^{\text{VF}}(\phi) - c_2(g) S[\pi_\theta]$$
 
 ---
 
-## 5. Reward Shaping & Placement Optimization
+## 5. Reward Shaping & Elimination of Reward Hacking
 
-Because games last 30 to 45 rounds, sparse terminal placement rewards are complemented by round-level signals:
+To prevent cowardly reward hacking (e.g., hyper-rolling at level 4 to scrape through rounds, sacrificing economy and locking in an 8th place), the per-round $+0.02$ survival tick is removed. The policy is guided purely by:
 1. **Round HP Preservation**: Penalizes damage taken from combat:
    $$r_{\text{combat}} = \frac{\Delta \text{HP}}{100} \times 0.5$$
 2. **PvP Win Bonus**: $+0.1$ for winning a PvP combat round.
-3. **Survival Tick**: $+0.02$ per round survived.
-4. **Tournament Placement Reward**: Awarded upon elimination or game end:
+3. **Tournament Placement Reward**: Awarded upon elimination or game end:
    - $1^{\text{st}}$: `+1.0` | $2^{\text{nd}}$: `+0.6` | $3^{\text{rd}}$: `+0.4` | $4^{\text{th}}$: `+0.2`
    - $5^{\text{th}}$: `-0.2` | $6^{\text{th}}$: `-0.4` | $7^{\text{th}}$: `-0.6` | $8^{\text{th}}$: `-1.0`
 
