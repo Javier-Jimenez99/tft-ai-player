@@ -4,14 +4,38 @@ from __future__ import annotations
 
 from typing import Any
 
-from catboost import CatBoostClassifier
-from lightgbm import LGBMClassifier
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.ensemble import RandomForestClassifier, VotingClassifier
+from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier, VotingClassifier
 from sklearn.pipeline import Pipeline
-from xgboost import XGBClassifier
 
 from .features import TFTBoardFeatureExtractor
+
+
+def build_hist_gradient_boosting_pipeline(
+    *,
+    feature_extractor: TFTBoardFeatureExtractor | None = None,
+    max_iter: int = 400,
+    max_depth: int = 10,
+    max_leaf_nodes: int = 63,
+    learning_rate: float = 0.04,
+    min_samples_leaf: int = 20,
+    l2_regularization: float = 0.1,
+    random_state: int = 42,
+    **kwargs: Any,
+) -> Pipeline:
+    """Build a scikit-learn Pipeline with feature extraction and HistGradientBoosting Classifier."""
+    extractor = feature_extractor or TFTBoardFeatureExtractor()
+    clf = HistGradientBoostingClassifier(
+        max_iter=max_iter,
+        max_depth=max_depth,
+        max_leaf_nodes=max_leaf_nodes,
+        learning_rate=learning_rate,
+        min_samples_leaf=min_samples_leaf,
+        l2_regularization=l2_regularization,
+        random_state=random_state,
+        **kwargs,
+    )
+    return Pipeline([("features", extractor), ("model", clf)])
 
 
 def build_xgboost_pipeline(
@@ -29,6 +53,11 @@ def build_xgboost_pipeline(
     **kwargs: Any,
 ) -> Pipeline:
     """Build a scikit-learn Pipeline with feature extraction and tuned XGBoost Classifier."""
+    try:
+        from xgboost import XGBClassifier
+    except (ImportError, Exception):
+        return build_hist_gradient_boosting_pipeline(feature_extractor=feature_extractor, random_state=random_state)
+
     extractor = feature_extractor or TFTBoardFeatureExtractor()
     clf = XGBClassifier(
         n_estimators=n_estimators,
@@ -64,23 +93,35 @@ def build_lightgbm_pipeline(
     **kwargs: Any,
 ) -> Pipeline:
     """Build a scikit-learn Pipeline with feature extraction and tuned LightGBM Classifier."""
-    extractor = feature_extractor or TFTBoardFeatureExtractor()
-    clf = LGBMClassifier(
-        n_estimators=n_estimators,
-        max_depth=max_depth,
-        num_leaves=num_leaves,
-        learning_rate=learning_rate,
-        min_child_samples=min_child_samples,
-        subsample=subsample,
-        colsample_bytree=colsample_bytree,
-        reg_alpha=reg_alpha,
-        reg_lambda=reg_lambda,
-        random_state=random_state,
-        verbose=verbose,
-        n_jobs=-1,
-        **kwargs,
-    )
-    return Pipeline([("features", extractor), ("model", clf)])
+    try:
+        from lightgbm import LGBMClassifier
+        extractor = feature_extractor or TFTBoardFeatureExtractor()
+        clf = LGBMClassifier(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            num_leaves=num_leaves,
+            learning_rate=learning_rate,
+            min_child_samples=min_child_samples,
+            subsample=subsample,
+            colsample_bytree=colsample_bytree,
+            reg_alpha=reg_alpha,
+            reg_lambda=reg_lambda,
+            random_state=random_state,
+            verbose=verbose,
+            n_jobs=-1,
+            **kwargs,
+        )
+        return Pipeline([("features", extractor), ("model", clf)])
+    except (ImportError, Exception):
+        return build_hist_gradient_boosting_pipeline(
+            feature_extractor=feature_extractor,
+            max_iter=n_estimators,
+            max_depth=max_depth,
+            max_leaf_nodes=num_leaves,
+            learning_rate=learning_rate,
+            min_samples_leaf=min_child_samples,
+            random_state=random_state,
+        )
 
 
 def build_catboost_pipeline(
@@ -95,18 +136,28 @@ def build_catboost_pipeline(
     **kwargs: Any,
 ) -> Pipeline:
     """Build a scikit-learn Pipeline with feature extraction and CatBoost Classifier."""
-    extractor = feature_extractor or TFTBoardFeatureExtractor()
-    clf = CatBoostClassifier(
-        iterations=iterations,
-        depth=depth,
-        learning_rate=learning_rate,
-        l2_leaf_reg=l2_leaf_reg,
-        random_seed=random_seed,
-        verbose=verbose,
-        thread_count=-1,
-        **kwargs,
-    )
-    return Pipeline([("features", extractor), ("model", clf)])
+    try:
+        from catboost import CatBoostClassifier
+        extractor = feature_extractor or TFTBoardFeatureExtractor()
+        clf = CatBoostClassifier(
+            iterations=iterations,
+            depth=depth,
+            learning_rate=learning_rate,
+            l2_leaf_reg=l2_leaf_reg,
+            random_seed=random_seed,
+            verbose=verbose,
+            thread_count=-1,
+            **kwargs,
+        )
+        return Pipeline([("features", extractor), ("model", clf)])
+    except (ImportError, Exception):
+        return build_hist_gradient_boosting_pipeline(
+            feature_extractor=feature_extractor,
+            max_iter=iterations,
+            max_depth=depth,
+            learning_rate=learning_rate,
+            random_state=random_seed,
+        )
 
 
 def build_random_forest_pipeline(

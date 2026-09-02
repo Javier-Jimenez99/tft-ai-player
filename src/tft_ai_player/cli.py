@@ -36,6 +36,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_rl_train(args)
         if args.command == "rl-league":
             return _run_rl_league(args)
+        if args.command == "pretrain-trunk":
+            return _run_pretrain_trunk(args)
     except (MetaTftRequestError, TimelineValidationError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -214,6 +216,18 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="automatically open the exported dashboard in the default browser",
     )
+    simulate_parser.add_argument(
+        "--rl-model",
+        type=str,
+        default=None,
+        help="path to trained RL PyTorch policy weights (.pt) to control focal player",
+    )
+    simulate_parser.add_argument(
+        "--round-winner-model",
+        type=str,
+        default="D:/tft-winner-data/set18/models/round_winner_model.joblib",
+        help="path to trained single round winner ML model for combat resolution",
+    )
 
     rl_train_parser = subcommands.add_parser(
         "rl-train",
@@ -246,8 +260,61 @@ def _build_parser() -> argparse.ArgumentParser:
     rl_train_parser.add_argument(
         "--checkpoint-dir",
         type=str,
-        default="checkpoints/league",
-        help="directory to persist model weights and league profiles (default: checkpoints/league)",
+        default="D:/tft-winner-data/set18/models",
+        help="directory to persist model weights, checkpoints, and league profiles (default: D:/tft-winner-data/set18/models)",
+    )
+    rl_train_parser.add_argument(
+        "--run-name",
+        type=str,
+        default="ppo_tri_tier_league_v1",
+        help="custom experiment run name for WandB tracking and grouping (default: ppo_tri_tier_league_v1)",
+    )
+    rl_train_parser.add_argument(
+        "--round-winner-model",
+        type=str,
+        default="D:/tft-winner-data/set18/models/round_winner_model.joblib",
+        help="path to trained single round winner ML model (default: D:/tft-winner-data/set18/models/round_winner_model.joblib)",
+    )
+    rl_train_parser.add_argument(
+        "--archetype",
+        type=str,
+        default="generalist",
+        choices=["generalist", "aggro_tempo", "hyper_roll", "fast8_flex"],
+        help="strategic gameplay archetype for agent reward modulation (default: generalist)",
+    )
+    rl_train_parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="resume training and WandB logging from existing checkpoint in checkpoint-dir with locked hyperparameters",
+    )
+    rl_train_parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="hardware execution device (cuda or cpu, default: auto-detect)",
+    )
+    rl_train_parser.add_argument(
+        "--wandb-project",
+        type=str,
+        default="tft-ai-league",
+        help="Weights & Biases project name (default: tft-ai-league)",
+    )
+    rl_train_parser.add_argument(
+        "--wandb-entity",
+        type=str,
+        default=None,
+        help="WandB username or team entity name",
+    )
+    rl_train_parser.add_argument(
+        "--wandb-group",
+        type=str,
+        default=None,
+        help="WandB experiment group",
+    )
+    rl_train_parser.add_argument(
+        "--no-wandb",
+        action="store_true",
+        help="disable WandB cloud logging and run in pure offline mode",
     )
 
     rl_league_parser = subcommands.add_parser(
@@ -271,6 +338,136 @@ def _build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="optional destination file to write markdown leaderboard report",
+    )
+
+    pretrain_parser = subcommands.add_parser(
+        "pretrain-trunk",
+        help="pretrain the Multi-Modal Fusion Trunk via dual-objective multi-task learning",
+    )
+    pretrain_parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path(r"D:\tft-winner-data\set18\players"),
+        help="directory containing player CSV files or path to single CSV",
+    )
+    pretrain_parser.add_argument(
+        "--output-dir",
+        "-o",
+        type=Path,
+        default=Path("models/trunk"),
+        help="destination directory for model checkpoints and vocab",
+    )
+    pretrain_parser.add_argument(
+        "--epochs",
+        type=int,
+        default=5,
+        help="number of pre-training epochs (default: 5)",
+    )
+    pretrain_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=64,
+        help="mini-batch size of snapshot pairs (default: 64)",
+    )
+    pretrain_parser.add_argument(
+        "--lr",
+        type=float,
+        default=1e-3,
+        help="AdamW learning rate (default: 1e-3)",
+    )
+    pretrain_parser.add_argument(
+        "--embed-dim",
+        type=int,
+        default=32,
+        help="Champ2Vec champion embedding dimension (default: 32)",
+    )
+    pretrain_parser.add_argument(
+        "--board-dim",
+        type=int,
+        default=256,
+        help="BoardEncoder spatial CNN output dimension (default: 256)",
+    )
+    pretrain_parser.add_argument(
+        "--fused-dim",
+        type=int,
+        default=384,
+        help="MultiModalFusionTrunk fused latent dimension (default: 384)",
+    )
+    pretrain_parser.add_argument(
+        "--val-weight",
+        type=float,
+        default=1.0,
+        help="weight for Macro Top-4 Cross-Entropy loss (default: 1.0)",
+    )
+    pretrain_parser.add_argument(
+        "--micro-weight",
+        type=float,
+        default=0.5,
+        help="weight for Micro combat round win probability BCE loss (default: 0.5)",
+    )
+    pretrain_parser.add_argument(
+        "--contrast-weight",
+        type=float,
+        default=0.15,
+        help="weight for Flow Time-Contrastive InfoNCE loss (default: 0.15)",
+    )
+    pretrain_parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.07,
+        help="InfoNCE temperature tau (default: 0.07)",
+    )
+    pretrain_parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=None,
+        help="optional cap on total snapshot pairs to load",
+    )
+    pretrain_parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="compute device: 'cpu' or 'cuda' (default: auto)",
+    )
+    pretrain_parser.add_argument(
+        "--synthetic",
+        action="store_true",
+        help="train on generated synthetic snapshot trajectories for quick testing",
+    )
+    pretrain_parser.add_argument(
+        "--log-interval",
+        type=int,
+        default=10,
+        help="batch frequency for real-time WandB metric logging (default: 10)",
+    )
+    pretrain_parser.add_argument(
+        "--wandb-project",
+        type=str,
+        default="tft-embeddings",
+        help="Weights & Biases project name (default: tft-embeddings)",
+    )
+    pretrain_parser.add_argument(
+        "--run-name",
+        type=str,
+        default=None,
+        help="custom experiment run name for WandB tracking",
+    )
+    pretrain_parser.add_argument(
+        "--wandb-entity",
+        type=str,
+        default=None,
+        help="WandB username or team entity name",
+    )
+    pretrain_parser.add_argument(
+        "--wandb-group",
+        type=str,
+        default="pretrain-phase1",
+        help="WandB experiment group",
+    )
+    pretrain_parser.add_argument(
+        "--no-wandb",
+        action="store_true",
+        help="disable WandB cloud logging and run in pure offline mode",
     )
 
     return parser
@@ -536,7 +733,8 @@ def _existing_game_ids(root: Path) -> set[str]:
 
 def _run_simulation(args: argparse.Namespace) -> int:
     """Execute a simulated TFT match and export the interactive visual replay HTML dashboard."""
-    from .simulation import StandardTempoBot, TFTGame, get_set_data
+    from .simulation import BaseBot, StandardTempoBot, TFTGame, get_set_data
+    from .simulation.combat import CombatResolver, HeuristicCombatResolver, MLCombatResolver
     from .simulation.visualizer import GameRecorder, generate_visual_html
 
     set_data = get_set_data(args.set)
@@ -544,10 +742,44 @@ def _run_simulation(args: argparse.Namespace) -> int:
     seed = args.seed
 
     print("\n" + "=" * 70)
-    print(f" [TFT VISUAL SIMULATION] Running match ({set_data.set_name}, seed={seed}) and recording visual replay...")
+    print(f" [TFT VISUAL SIMULATION] Running match ({set_data.set_name}, seed={seed})...")
+
+    # 1. Combat resolver
+    combat_resolver: CombatResolver = HeuristicCombatResolver()
+    if args.round_winner_model and Path(args.round_winner_model).exists():
+        combat_resolver = MLCombatResolver(model_pipeline=args.round_winner_model)
+        print(f"  Combat Model: ML (LightGBM) from {args.round_winner_model}")
+    else:
+        print("  Combat Model: Heuristic Combat Resolver")
+
+    # 2. Focal player bot policy (RL or Heuristic)
+    focal_bot: BaseBot
+    if args.rl_model and Path(args.rl_model).exists():
+        import torch
+        from tft_ai_player.rl.agent_policy import RLBot
+        from tft_ai_player.rl.models.networks import TFTActorCritic
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = TFTActorCritic(
+            num_champs=len(set_data.champions) + 1,
+            num_items=len(set_data.items) + 1,
+        )
+        weights = torch.load(args.rl_model, map_location=device)
+        if isinstance(weights, dict) and "model_state_dict" in weights:
+            model.load_state_dict(weights["model_state_dict"])
+        else:
+            model.load_state_dict(weights)
+        model.to(device)
+        model.eval()
+        focal_bot = RLBot(model=model, set_data=set_data, deterministic=True, device=device)
+        print(f"  Focal Agent Policy: RL Neural Policy from {args.rl_model} (Device: {device})")
+    else:
+        focal_bot = StandardTempoBot()
+        print("  Focal Agent Policy: StandardTempoBot (Rule-based Baseline)")
+
     print("=" * 70)
 
-    game = TFTGame(set_data=set_data, seed=seed)
+    game = TFTGame(set_data=set_data, seed=seed, combat_resolver=combat_resolver)
     recorder = GameRecorder(game)
     recorder.capture_snapshot(event_type="GAME_START")
 
@@ -561,7 +793,6 @@ def _run_simulation(args: argparse.Namespace) -> int:
 
         focal_p = game.get_focal_player()
         if focal_p.alive:
-            focal_bot = StandardTempoBot()
             focal_bot.take_turn(
                 player=focal_p,
                 pool=game.pool,
@@ -602,34 +833,145 @@ def _run_simulation(args: argparse.Namespace) -> int:
 
 
 def _run_rl_train(args: argparse.Namespace) -> int:
-    """Execute RL Maskable PPO training loop with League evaluation."""
-    from tft_ai_player.rl.evaluation.report import generate_league_markdown_report, print_league_terminal_summary
+    """Execute RL Maskable PPO training loop with League evaluation, TensorBoard tracking, and GPU support."""
+    import subprocess
+    import sys
+    import webbrowser
+    import torch
+    from tft_ai_player.rl.evaluation.report import print_league_terminal_summary
     from tft_ai_player.rl.train import LeagueTrainer
+    from tft_ai_player.simulation.sets.set18 import get_set18_data
+
+    def _resolve_dir(p_str: str, default_sub: str) -> Path:
+        if p_str:
+            p = Path(p_str)
+            if str(p).upper().startswith("D:") and not Path("D:/").exists():
+                return Path(__file__).resolve().parents[2] / default_sub / "set18"
+            return p
+        if Path("D:/").exists():
+            return Path("D:/tft-winner-data/set18") / default_sub
+        return Path(__file__).resolve().parents[2] / default_sub / "set18"
+
+    def _resolve_file(p_str: str) -> str | None:
+        if p_str:
+            p = Path(p_str)
+            if str(p).upper().startswith("D:") and not Path("D:/").exists():
+                fallback = Path(__file__).resolve().parents[2] / "models" / "set18" / p.name
+                return str(fallback)
+            return str(p)
+        return None
+
+    device_name = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
+    checkpoint_dir = _resolve_dir(args.checkpoint_dir, "models")
+    rw_model_path = _resolve_file(args.round_winner_model)
+
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     print("\n" + "=" * 70)
-    print(" [TFT RL TRAINING] Initializing Maskable PPO & AlphaStar League...")
+    print(" [TFT RL TRAINING] Maskable PPO + GRU Memory + Multi-Head Self-Attention")
+    print(f"  Target Set: Set 18 | Device: {device_name.upper()}")
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        vram_total = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        print(f"  GPU Hardware: {gpu_name} ({vram_total:.1f} GB VRAM)")
     print(f"  Generations: {args.generations} | Rollout Steps: {args.rollout_steps} | Batch Size: {args.batch_size}")
+    print(f"  Models & Checkpoint Storage: {checkpoint_dir}")
+    print(f"  Round Winner ML Model: {rw_model_path}")
     print("=" * 70)
 
+    # 1. Initialize League Trainer
+    from tft_ai_player.rl.types import AgentArchetype
+    archetype_val = AgentArchetype(getattr(args, "archetype", "generalist"))
+    use_wandb = not getattr(args, "no_wandb", False)
+
     trainer = LeagueTrainer(
+        set_data=get_set18_data(),
+        archetype=archetype_val,
         buffer_size=args.rollout_steps + 64,
         batch_size=args.batch_size,
-        checkpoint_dir=args.checkpoint_dir,
+        device=device_name,
+        checkpoint_dir=checkpoint_dir,
+        run_name=args.run_name,
+        round_winner_model_path=rw_model_path,
+        use_wandb=use_wandb,
+        wandb_project=getattr(args, "wandb_project", "tft-ai-league"),
+        wandb_entity=getattr(args, "wandb_entity", None),
+        wandb_group=getattr(args, "wandb_group", None) or args.run_name,
     )
+    print(f"  Strategic Archetype: {archetype_val.value.upper()} | Run Name: {trainer.run_name}")
+    print("=" * 70)
 
-    for gen in range(1, args.generations + 1):
-        metrics = trainer.train_iteration(
-            generation=gen,
-            rollout_steps=args.rollout_steps,
-            eval_every=args.eval_every,
-        )
-        print(
-            f" [Gen {gen:03d}/{args.generations:03d}] Loss: {metrics['loss']:.4f} | PolLoss: {metrics['policy_loss']:.4f} | ValLoss: {metrics['value_loss']:.4f} | Ent: {metrics['entropy']:.3f} | Steps: {metrics['steps']}"
-        )
-        if "eval_avg_placement" in metrics:
-            print(
-                f"   |--> Benchmark Placement: {metrics['eval_avg_placement']:.2f} | Top 4: {metrics['eval_top4_rate']*100:.1f}% | League Elo: {metrics['league_elo']:.1f}"
+    # 2. Resume if requested (locks hyperparameters from existing checkpoint)
+    start_gen = 1
+    if args.resume:
+        resumed_gen = trainer.load_checkpoint()
+        if resumed_gen > 0:
+            start_gen = resumed_gen + 1
+            print(f" [!] Resumed Tri-Tier run '{trainer.run_name}' from Generation {resumed_gen} with locked hyperparameters!")
+        else:
+            print(" [!] No previous checkpoint found in checkpoint-dir. Starting fresh run from Generation 1.")
+
+    end_gen = start_gen + args.generations - 1
+
+    # 3. Training loop
+    try:
+        for gen in range(start_gen, end_gen + 1):
+            metrics = trainer.train_iteration(
+                generation=gen,
+                rollout_steps=args.rollout_steps,
+                eval_every=args.eval_every,
             )
+
+            # Display Tri-Tier Multi-Agent Overview
+            tri = metrics.get("tri_tier", {})
+            if tri and len(tri) >= 3:
+                print(f" [Gen {gen:03d}/{end_gen:03d}] Multi-Agent League Overview:", flush=True)
+                for aid, label in [
+                    ("Main_Agent", "Main Agent (Generalist)      "),
+                    ("Main_Exploiter", "Main Exploiter (Hyper-Roll)  "),
+                    ("League_Exploiter", "League Exploiter (Fast-8/9) "),
+                ]:
+                    if aid in tri:
+                        ad = tri[aid]
+                        elo_v = ad.get("elo", 1200.0)
+                        rew_v = ad.get("mean_reward", 0.0)
+                        loss_v = ad.get("loss", 0.0)
+                        act = ad.get("action_distribution", {})
+                        act_str = (
+                            f"Pass: {act.get('Pass', 0)*100:4.1f}% | Buy: {act.get('Buy', 0)*100:4.1f}% | "
+                            f"Roll: {act.get('Reroll', 0)*100:4.1f}% | EXP: {act.get('EXP', 0)*100:4.1f}% | "
+                            f"Deploy: {act.get('Deploy', 0)*100:4.1f}%"
+                        ) if act else ""
+                        print(f"   |--> [{label}] Rew: {rew_v:+.4f} | Elo: {elo_v:6.1f} | Loss: {loss_v:.4f} | {act_str}", flush=True)
+            else:
+                econ = metrics.get("block_economy", 0.0)
+                board = metrics.get("block_board_power", metrics.get("block_board_building", 0.0))
+                combat = metrics.get("block_combat_outcome", metrics.get("block_combat", 0.0))
+                kl = metrics.get("approx_kl", 0.0)
+                ev = metrics.get("explained_variance", 0.0)
+                print(
+                    f" [Gen {gen:03d}/{end_gen:03d}] Rew: {metrics['mean_reward']:+.4f} (Econ: {econ:+.3f}, Board: {board:+.3f}, Cbt: {combat:+.3f}) | Loss: {metrics['loss']:.4f} | Pol: {metrics['policy_loss']:.4f} | Ent: {metrics['entropy']:.3f} | KL: {kl:.4f} | EV: {ev:+.2f}",
+                    flush=True,
+                )
+
+            # Display Turn Efficiency for Main Agent
+            if "actions_per_round" in metrics:
+                apm = metrics["actions_per_round"]
+                clean_econ = metrics.get("pass_clean_econ_rate", 0.0) * 100.0
+                missed_items = metrics.get("pass_missed_craft_rate", 0.0) * 100.0
+                missed_upg = metrics.get("pass_missed_upgrade_rate", 0.0) * 100.0
+                print(
+                    f"   |--> Turn Efficiency: APM (Non-Pass/Rnd): {apm:.2f} | Clean Econ Passes: {clean_econ:.1f}% | Missed Crafts: {missed_items:.1f}% | Missed Upgrades: {missed_upg:.1f}%",
+                    flush=True,
+                )
+
+            if "eval_avg_placement" in metrics:
+                print(
+                    f"   |--> Benchmark Placement: {metrics['eval_avg_placement']:.2f} | Top 4: {metrics['eval_top4_rate']*100:.1f}% | Win: {metrics['eval_win_rate']*100:.1f}% | League Elo: {metrics['league_elo']:.1f}",
+                    flush=True,
+                )
+    finally:
+        trainer.wandb_logger.close()
 
     print("\n[+] Training completed successfully!")
     print_league_terminal_summary(trainer.league)
@@ -673,3 +1015,92 @@ def _run_rl_league(args: argparse.Namespace) -> int:
         print(f" [+] Markdown Leaderboard written to: file:///{out_path.as_posix()}")
 
     return 0
+
+
+def _run_pretrain_trunk(args: argparse.Namespace) -> int:
+    """Execute pre-training of Multi-Modal Fusion Trunk."""
+    from tft_ai_player.embeddings import (
+        ChampionVocabulary,
+        ItemVocabulary,
+        TraitVocabulary,
+        TFTPretrainDataset,
+        TrunkPreTrainer,
+        create_synthetic_trajectory_dataset,
+    )
+
+    print("\n" + "=" * 75)
+    print(" [TFT MULTI-MODAL TRUNK] Phase 1: Dual-Objective Multi-Task Pre-training")
+    print("=" * 75)
+
+    vocab = ChampionVocabulary()
+    item_vocab = ItemVocabulary()
+    trait_vocab = TraitVocabulary()
+
+    if args.synthetic or not Path(args.data_dir).exists():
+        if not args.synthetic:
+            print(f"[!] Data directory '{args.data_dir}' not found. Falling back to synthetic dataset.")
+        print(" [+] Generating synthetic trajectory dataset...")
+        dataset = create_synthetic_trajectory_dataset(
+            num_matches=50,
+            rounds_per_match=16,
+            vocab=vocab,
+            item_vocab=item_vocab,
+            trait_vocab=trait_vocab,
+        )
+    else:
+        print(f" [+] Loading snapshot dataset from: {args.data_dir}")
+        dataset = TFTPretrainDataset(
+            data=args.data_dir,
+            vocab=vocab,
+            item_vocab=item_vocab,
+            trait_vocab=trait_vocab,
+            max_samples=args.max_samples,
+        )
+
+    print(
+        f" [+] Dataset loaded: {len(dataset)} snapshot pairs | "
+        f"Vocabs: {len(vocab)} champs, {len(item_vocab)} items, {len(trait_vocab)} traits"
+    )
+
+    if len(dataset) == 0:
+        print(" [!] No valid snapshot pairs found in dataset.", file=sys.stderr)
+        return 1
+
+    trainer = TrunkPreTrainer(
+        vocab=vocab,
+        item_vocab=item_vocab,
+        trait_vocab=trait_vocab,
+        champ_embed_dim=args.embed_dim,
+        board_feat_dim=args.board_dim,
+        fused_dim=args.fused_dim,
+        lr=args.lr,
+        value_weight=args.val_weight,
+        micro_weight=args.micro_weight,
+        contrast_weight=args.contrast_weight,
+        temperature=args.temperature,
+        log_interval=args.log_interval,
+        use_wandb=not args.no_wandb,
+        wandb_project=args.wandb_project,
+        wandb_run_name=args.run_name,
+        wandb_entity=args.wandb_entity,
+        wandb_group=args.wandb_group,
+        device=args.device,
+    )
+
+    summary = trainer.fit(
+        dataset=dataset,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        output_dir=args.output_dir,
+    )
+
+    print("\n" + "=" * 75)
+    print(f" [+] Pre-training completed in {summary['total_time_sec']}s!")
+    print(f"     Artifacts saved to: {Path(args.output_dir).resolve()}")
+    print("=" * 75 + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+

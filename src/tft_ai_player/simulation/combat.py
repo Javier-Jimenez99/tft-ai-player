@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 import pandas as pd
@@ -189,30 +190,60 @@ class MLCombatResolver:
 
         r = rng or random
 
-        # Construct input DataFrame matching feature extractor format
-        row_dict = {
-            "round_stage": stage_str,
-            "focal_level": player_a.level,
-            "focal_health": player_a.health,
-            "focal_gold": player_a.gold,
-            "focal_augments": "",
-            "opponent_level": player_b.level,
-            "opponent_health": player_b.health,
-            "opponent_augments": "",
-            "input_state_json": {
-                "focal_board": player_a.to_feature_board(),
-                "opponent_board": player_b.to_feature_board(),
-            },
-        }
+        try:
+            if isinstance(self.model_pipeline, (str, Path)):
+                from tft_ai_player.round_winner.trainer import RoundWinnerPredictor
+                self.model_pipeline = RoundWinnerPredictor.load(self.model_pipeline)
+        except (Exception, BaseException):
+            return self.fallback.resolve(
+                player_a,
+                player_b,
+                is_ghost_b,
+                stage,
+                stage_str,
+                set_data,
+                rng=rng,
+            )
+
+        predicted_damage_loss: int | None = None
 
         try:
-            df = pd.DataFrame([row_dict])
-            probs = self.model_pipeline.predict_proba(df)
-            # Class 1 probability (focal player win)
-            win_prob_a = float(probs[0, 1])
-            win_prob_a = max(0.01, min(0.99, win_prob_a))
-        except Exception:
-            # Fallback to heuristic on unexpected feature error
+            from tft_ai_player.round_winner.trainer import RoundWinnerPredictor
+            if isinstance(self.model_pipeline, RoundWinnerPredictor):
+                win_prob_a, dmg_a_loss, dmg_b_loss = self.model_pipeline.predict_combat(
+                    player_a.to_feature_board(),
+                    player_b.to_feature_board(),
+                    round_stage=stage_str,
+                    focal_level=player_a.level,
+                    opponent_level=player_b.level,
+                    focal_health=player_a.health,
+                    opponent_health=player_b.health,
+                    focal_gold=player_a.gold,
+                    opponent_gold=player_b.gold,
+                )
+            else:
+                row_dict = {
+                    "round_stage": stage_str,
+                    "focal_level": player_a.level,
+                    "focal_health": player_a.health,
+                    "focal_gold": player_a.gold,
+                    "focal_augments": "",
+                    "opponent_level": player_b.level,
+                    "opponent_health": player_b.health,
+                    "opponent_augments": "",
+                    "input_state_json": {
+                        "focal_board": player_a.to_feature_board(),
+                        "opponent_board": player_b.to_feature_board(),
+                    },
+                }
+                df = pd.DataFrame([row_dict])
+                probs = self.model_pipeline.predict_proba(df)
+                win_prob_a = float(probs[0, 1])
+                dmg_a_loss = None
+                dmg_b_loss = None
+            win_prob_a = max(0.01, min(0.99, float(win_prob_a)))
+        except (Exception, BaseException):
+            # Fallback to heuristic on unexpected feature error or missing DLL
             return self.fallback.resolve(
                 player_a,
                 player_b,
@@ -235,13 +266,19 @@ class MLCombatResolver:
             loser_id = player_b.player_id
             winner_board_len = len(player_a.board) or 1
             surviving = min(winner_board_len, max(1, int(round(win_prob_a * winner_board_len * 0.7))))
+            if dmg_b_loss is not None:
+                damage = dmg_b_loss
+            else:
+                damage = base_damage + surviving
         else:
             winner_id = player_b.player_id
             loser_id = player_a.player_id
             winner_board_len = len(player_b.board) or 1
             surviving = min(winner_board_len, max(1, int(round((1.0 - win_prob_a) * winner_board_len * 0.7))))
-
-        damage = base_damage + surviving
+            if dmg_a_loss is not None:
+                damage = dmg_a_loss
+            else:
+                damage = base_damage + surviving
 
         return CombatResult(
             winner_id=winner_id,

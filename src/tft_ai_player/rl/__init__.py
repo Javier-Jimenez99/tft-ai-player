@@ -9,6 +9,7 @@ from tft_ai_player.rl.evaluation.report import generate_league_markdown_report, 
 from tft_ai_player.rl.league.checkpoints import CheckpointManager
 from tft_ai_player.rl.league.elo import MultilateralEloSystem
 from tft_ai_player.rl.league.league_manager import LeagueManager
+from tft_ai_player.rl.logger import WandBLogger
 from tft_ai_player.rl.models.distributions import MaskedCategorical
 from tft_ai_player.rl.models.networks import TFTActorCritic
 from tft_ai_player.rl.train import LeagueTrainer
@@ -29,6 +30,7 @@ __all__ = [
     "RolloutBuffer",
     "TFTActorCritic",
     "TournamentEvaluator",
+    "WandBLogger",
     "generate_league_markdown_report",
     "print_league_terminal_summary",
 ]

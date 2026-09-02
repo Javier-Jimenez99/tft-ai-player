@@ -23,14 +23,19 @@ class RLBot:
         model: TFTActorCritic,
         set_data: SetData,
         deterministic: bool = False,
-        max_micro_actions: int = 30,
+        max_micro_actions: int = 10,
         device: torch.device | None = None,
     ) -> None:
         self.model = model
         self.set_data = set_data
         self.deterministic = deterministic
         self.max_micro_actions = max_micro_actions
-        self.device = device or torch.device("cpu")
+        if device is not None:
+            self.device = device
+        elif model is not None and len(list(model.parameters())) > 0:
+            self.device = next(model.parameters()).device
+        else:
+            self.device = torch.device("cpu")
         self.encoder = ObservationEncoder(set_data)
         self.model.eval()
 
@@ -53,9 +58,10 @@ class RLBot:
         if not opponents:
             opponents = [player]
 
-        sm = stage_manager or StageManager()
+        sm = stage_manager or StageManager(set_data)
 
         actions_taken = 0
+        hidden_state: torch.Tensor | None = None
         while actions_taken < self.max_micro_actions:
             # 1. Encode observation
             obs_dict = self.encoder.encode_dict(player, opponents, pool, sm)
@@ -70,10 +76,15 @@ class RLBot:
             mask_tensor = torch.as_tensor(mask, dtype=torch.bool, device=self.device).unsqueeze(0)
 
             with torch.no_grad():
-                action_t, _, _ = self.model.get_action(
-                    tensor_obs, mask_tensor, deterministic=self.deterministic
+                action_t, _, _, next_hidden = self.model.get_action(
+                    tensor_obs,
+                    mask_tensor,
+                    deterministic=self.deterministic,
+                    hidden_state=hidden_state,
+                    return_hidden=True,
                 )
                 action_id = int(action_t.item())
+                hidden_state = next_hidden
 
             # Action 0 is PASS (end planning turn)
             if action_id == 0:
@@ -81,6 +92,8 @@ class RLBot:
 
             # Execute micro action
             success = execute_action(player, pool, set_data, action_id, rng=rng)
+            if not success:
+                break
             actions_taken += 1
 
             if not success:

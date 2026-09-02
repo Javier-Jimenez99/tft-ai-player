@@ -108,9 +108,10 @@ class TFTGame:
         rinfo = self.stage_manager.get_current_round_info()
         results: list[CombatResult] = []
 
-        # 0. Enforce strict board capacity limits for all alive players
+        # 0. Auto-fill open board slots from bench, then enforce strict capacity for all alive players
         for p in self.players:
             if p.alive:
+                p.auto_fill_board_from_bench(self.pool)
                 p.enforce_board_capacity(self.pool)
 
         # 1. Resolve Round Type Mechanics

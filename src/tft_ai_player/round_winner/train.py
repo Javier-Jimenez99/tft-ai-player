@@ -7,6 +7,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from .trainer import RoundWinnerPredictor, RoundWinnerTrainer
@@ -17,13 +18,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--data-dir",
         type=Path,
-        default=Path(r"D:\tft-winner-data\players"),
+        default=Path(r"D:\tft-winner-data\set18\players") if Path(r"D:\tft-winner-data\set18\players").exists() else Path(r"D:\tft-winner-data\players"),
         help="Path to directory containing player round CSV files.",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("models/round_winner"),
+        default=Path(r"D:\tft-winner-data\set18\models") if Path(r"D:\tft-winner-data\set18\models").exists() else Path("models/round_winner"),
         help="Directory where model bundle and metadata will be saved.",
     )
     parser.add_argument(
@@ -76,7 +77,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     model_filename = args.model_filename or ("round_winner_ensemble.joblib" if args.include_xgboost else "round_winner_model.joblib")
     metadata_filename = args.metadata_filename or ("metadata_ensemble.json" if args.include_xgboost else "metadata.json")
 
-    print(f"=== TFT Round Winner Model Training Pipeline ===")
+    print(f"=== TFT 3-Output Multi-Task Round Winner & Combat Damage Model Training ===")
     print(f"Data source: {data_dir.resolve()}")
     print(f"Output directory: {args.output_dir.resolve()}")
     print(f"Target model file: {model_filename}")
@@ -115,6 +116,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     df_clean["label"] = df_clean["label"].astype(int)
     df_clean = df_clean.drop_duplicates(subset=["match_id", "round_stage", "focal_player"]).reset_index(drop=True)
 
+    # Compute ground truth damage loss
+    if "focal_health" in df_clean.columns:
+        df_clean["hp_loss"] = df_clean.groupby(["match_id", "focal_player"])["focal_health"].diff(-1)
+        stage_nums = df_clean["round_stage"].astype(str).str[0]
+        stage_baseline = stage_nums.map({
+            "1": 2, "2": 5, "3": 10, "4": 12, "5": 15, "6": 18, "7": 21
+        }).fillna(10).astype(float)
+        valid_mask = (df_clean["label"] == 0) & (df_clean["hp_loss"] >= 1.0) & (df_clean["hp_loss"] <= 45.0)
+        df_clean["damage_loss"] = np.where(valid_mask, df_clean["hp_loss"], stage_baseline)
+    else:
+        df_clean["damage_loss"] = 10.0
+
     print(f"Loaded {len(df_clean):,} clean round observations across {df_clean['match_id'].nunique():,} unique matches.")
 
     metadata = trainer.fit_and_evaluate(
@@ -124,14 +137,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         verbose=True,
     )
 
-    print("\n--- Model Leaderboard vs MetaTFT Baseline ---")
+    print("\n--- Model Leaderboard: Win/Loss Classification ---")
     metrics = metadata["evaluation_metrics"]
     for name, res in metrics.items():
-        if res:
+        if res and isinstance(res, dict) and "model" in res:
             print(
                 f"{res['model']:<25} | Brier: {res['brier_score']:.4f} | "
                 f"ROC-AUC: {res['roc_auc']:.4f} | Acc: {res['accuracy']*100:.2f}% | ECE: {res['ece']*100:.2f}%"
             )
+
+    if "combat_damage_regression" in metrics:
+        dmg_eval = metrics["combat_damage_regression"]
+        print(f"\n--- Model Leaderboard: Combat Damage Regression (Heads 2 & 3) ---")
+        print(f"Test Loss Rounds Evaluated: {dmg_eval['test_loss_samples']:,}")
+        print(f"Mean Absolute Error (MAE) : {dmg_eval['damage_mae']:.3f} HP")
+        print(f"Root Mean Squared Error   : {dmg_eval['damage_rmse']:.3f} HP")
 
     print("\n--- Tactical Stress Sanity Tests ---")
     for st in metadata["stress_tests"]:
@@ -143,24 +163,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         model_filename=model_filename,
         metadata_filename=metadata_filename,
     )
-    print(f"\n[SUCCESS] Model bundle saved to: {saved_path.resolve()}")
+    print(f"\n[SUCCESS] 3-Output Multi-Task model saved to: {saved_path.resolve()}")
     print(f"[SUCCESS] Training metadata saved to: {(args.output_dir / metadata_filename).resolve()}")
 
-    # Quick test of loaded predictor
+    # 3-Output Verification Check
     predictor = RoundWinnerPredictor.load(saved_path)
     is_set18 = any(c.startswith("DA_") or "18" in c for c in predictor.feature_names_)
     if is_set18:
-        sample_prob = predictor.predict_proba(
+        p_win, dmg_a, dmg_b = predictor.predict_combat(
             focal_board=[{"unit": "DA_18_Xayah", "tier": 2, "loc": "D1", "items": ["DA_InfinityEdge", "DA_LastWhisper"]}],
             opponent_board=[{"unit": "DA_18_Camille", "tier": 1, "loc": "A1", "items": []}],
+            round_stage="4-2",
         )
-        print(f"[VERIFY] Inference Sanity Check (2-Star 2-Item Xayah vs 1-Star Camille): P(Focal Win) = {sample_prob*100:.1f}%")
+        print(f"[VERIFY 3-OUTPUT] 2-Star Xayah vs 1-Star Camille -> P(Win A) = {p_win*100:.1f}% | Loss Damage to A: {dmg_a} HP | Loss Damage to B: {dmg_b} HP")
     else:
-        sample_prob = predictor.predict_proba(
+        p_win, dmg_a, dmg_b = predictor.predict_combat(
             focal_board=[{"unit": "TFT17_Jinx", "tier": 2, "loc": "D1", "items": ["TFT_Item_InfinityEdge"]}],
             opponent_board=[{"unit": "TFT17_Aatrox", "tier": 1, "loc": "A1", "items": []}],
+            round_stage="4-2",
         )
-        print(f"[VERIFY] Inference Sanity Check (2-Star Jinx vs 1-Star Aatrox): P(Focal Win) = {sample_prob*100:.1f}%")
+        print(f"[VERIFY 3-OUTPUT] 2-Star Jinx vs 1-Star Aatrox -> P(Win A) = {p_win*100:.1f}% | Loss Damage to A: {dmg_a} HP | Loss Damage to B: {dmg_b} HP")
 
     return 0
 

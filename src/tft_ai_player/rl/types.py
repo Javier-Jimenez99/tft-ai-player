@@ -8,6 +8,9 @@ from typing import Any, Protocol
 import numpy as np
 
 
+from tft_ai_player.simulation.config import AgentArchetype
+
+
 class AgentRole(str, Enum):
     """Categorical role of an agent within the AlphaStar-style League."""
 
@@ -67,6 +70,7 @@ class AgentProfile:
     agent_id: str
     name: str
     role: AgentRole
+    archetype: AgentArchetype = AgentArchetype.GENERALIST
     elo: EloRating = field(default_factory=EloRating)
     checkpoint_path: str | None = None
     generation: int = 0

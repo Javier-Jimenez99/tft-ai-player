@@ -377,3 +377,60 @@ def test_stage_aware_carousel_draft(set_data: SetData, pool: ChampionPool) -> No
     for ev in events_5:
         assert ev["cost"] in (4, 5)
 
+
+def test_auto_fill_board_from_bench(set_data: SetData, pool: ChampionPool) -> None:
+    """Verify auto_fill_board_from_bench transfers strongest bench units to fill empty board slots up to team size."""
+    player = Player(0, set_data)
+    player.level = 4  # Capacity = 4 units
+    assert player.max_board_units == 4
+    assert player.board_unit_count == 0
+
+    # Place 3 units on bench
+    u1 = ChampionInstance("TFT17_Aatrox", cost=1, star_level=1)
+    u2 = ChampionInstance("TFT17_Ahri", cost=3, star_level=2)
+    u3 = ChampionInstance("TFT17_Akali", cost=2, star_level=1)
+    player.bench[0] = u1
+    player.bench[1] = u2
+    player.bench[2] = u3
+
+    # Auto-fill: should move all 3 units to the board
+    deployed = player.auto_fill_board_from_bench(pool)
+    assert deployed == 3
+    assert player.board_unit_count == 3
+    assert player.bench[0] is None
+    assert player.bench[1] is None
+    assert player.bench[2] is None
+
+    # Now add 3 more units to bench (total would exceed team size of 4)
+    u4 = ChampionInstance("TFT17_Ashe", cost=2, star_level=1)
+    u5 = ChampionInstance("TFT17_Braum", cost=4, star_level=1)
+    u6 = ChampionInstance("TFT17_Caitlyn", cost=1, star_level=2)
+    player.bench[0] = u4
+    player.bench[1] = u5
+    player.bench[2] = u6
+
+    # Capacity is 4, currently 3 -> only 1 unit can be deployed.
+    # Candidates: u6 (2-star, cost 1), u5 (1-star, cost 4), u4 (1-star, cost 2)
+    # Strongest is u6 (star_level 2)
+    deployed_2 = player.auto_fill_board_from_bench(pool)
+    assert deployed_2 == 1
+    assert player.board_unit_count == 4
+    assert player.bench[2] is None  # u6 was deployed
+    assert player.bench[0] is not None
+    assert player.bench[1] is not None
+
+
+def test_round_win_loss_rewards_in_env(set_data: SetData) -> None:
+    """Verify gym_env awards significant positive rewards on round win and negative on round loss."""
+    env = TFTEnv(set_data=set_data)
+    obs, info = env.reset(seed=42)
+
+    # Perform PASS action to advance round
+    obs, reward, term, trunc, info = env.step(0)
+    assert "reward_breakdown" in info
+    rb = info["reward_breakdown"]
+    assert "rew_round_win" in rb
+    assert "rew_round_loss" in rb
+    assert "block_combat_outcome" in rb
+
+

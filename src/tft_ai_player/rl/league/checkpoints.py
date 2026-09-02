@@ -90,3 +90,113 @@ class CheckpointManager:
                     profile.checkpoint_path = str(weights_path)
                 return profile
         return None
+
+    def save_training_state(
+        self,
+        model: Any,
+        optimizer: Any | None,
+        generation: int,
+        entropy_coef: float,
+        metrics_history: list[dict[str, Any]] | None = None,
+        is_best: bool = False,
+        filename: str = "rl_training_checkpoint.pt",
+        main_exploiter_model: Any | None = None,
+        main_exploiter_optimizer: Any | None = None,
+        league_exploiter_model: Any | None = None,
+        league_exploiter_optimizer: Any | None = None,
+        config: dict[str, Any] | None = None,
+        wandb_run_id: str | None = None,
+    ) -> Path:
+        """Serialize full training state, hyperparameter configuration, and Tri-Tier models for seamless resumption."""
+        import torch
+
+        checkpoint_path = self.base_dir / filename
+        state: dict[str, Any] = {
+            "generation": generation,
+            "entropy_coef": entropy_coef,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict() if optimizer else None,
+            "metrics_history": metrics_history or [],
+            "config": config or {},
+            "wandb_run_id": wandb_run_id,
+        }
+
+        if main_exploiter_model is not None:
+            state["main_exploiter_model_state_dict"] = main_exploiter_model.state_dict()
+        if main_exploiter_optimizer is not None:
+            state["main_exploiter_optimizer_state_dict"] = main_exploiter_optimizer.state_dict()
+        if league_exploiter_model is not None:
+            state["league_exploiter_model_state_dict"] = league_exploiter_model.state_dict()
+        if league_exploiter_optimizer is not None:
+            state["league_exploiter_optimizer_state_dict"] = league_exploiter_optimizer.state_dict()
+
+        torch.save(state, checkpoint_path)
+
+        # Also save latest weights
+        latest_path = self.base_dir / "rl_model_latest.pt"
+        torch.save(model.state_dict(), latest_path)
+
+        if is_best:
+            best_path = self.base_dir / "rl_model_best.pt"
+            torch.save(model.state_dict(), best_path)
+
+        # Save metrics history JSON
+        if metrics_history:
+            metrics_path = self.base_dir / "rl_training_metrics.json"
+            with open(metrics_path, "w", encoding="utf-8") as f:
+                json.dump(metrics_history, f, indent=2)
+
+        return checkpoint_path
+
+    def load_training_state(
+        self,
+        checkpoint_path: str | Path | None = None,
+        model: Any | None = None,
+        optimizer: Any | None = None,
+        main_exploiter_model: Any | None = None,
+        main_exploiter_optimizer: Any | None = None,
+        league_exploiter_model: Any | None = None,
+        league_exploiter_optimizer: Any | None = None,
+    ) -> dict[str, Any] | None:
+        """Load full training state and restore all Tri-Tier models, optimizers, and locked hyperparameters."""
+        import torch
+
+        target_path = Path(checkpoint_path) if checkpoint_path else (self.base_dir / "rl_training_checkpoint.pt")
+        if not target_path.exists():
+            return None
+
+        state = torch.load(target_path, map_location="cpu", weights_only=False)
+
+        if isinstance(state, dict) and "model_state_dict" in state:
+            # 1. Restore Main Agent
+            if model is not None:
+                model.load_state_dict(state["model_state_dict"])
+            if optimizer is not None and state.get("optimizer_state_dict"):
+                optimizer.load_state_dict(state["optimizer_state_dict"])
+
+            # 2. Restore Main Exploiter
+            if main_exploiter_model is not None and "main_exploiter_model_state_dict" in state:
+                main_exploiter_model.load_state_dict(state["main_exploiter_model_state_dict"])
+            if main_exploiter_optimizer is not None and state.get("main_exploiter_optimizer_state_dict"):
+                main_exploiter_optimizer.load_state_dict(state["main_exploiter_optimizer_state_dict"])
+
+            # 3. Restore League Exploiter
+            if league_exploiter_model is not None and "league_exploiter_model_state_dict" in state:
+                league_exploiter_model.load_state_dict(state["league_exploiter_model_state_dict"])
+            if league_exploiter_optimizer is not None and state.get("league_exploiter_optimizer_state_dict"):
+                league_exploiter_optimizer.load_state_dict(state["league_exploiter_optimizer_state_dict"])
+
+            return {
+                "generation": state.get("generation", 0),
+                "entropy_coef": state.get("entropy_coef", 0.01),
+                "metrics_history": state.get("metrics_history", []),
+                "config": state.get("config", {}),
+                "wandb_run_id": state.get("wandb_run_id"),
+            }
+        elif model is not None:
+            # Raw weights file
+            model.load_state_dict(state)
+            return {"generation": 0, "entropy_coef": 0.01, "metrics_history": [], "config": {}, "wandb_run_id": None}
+
+        return None
+

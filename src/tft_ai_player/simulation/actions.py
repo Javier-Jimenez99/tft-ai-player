@@ -14,7 +14,7 @@ from tft_ai_player.simulation.models import ChampionPool, Player
 
 
 class ActionType(IntEnum):
-    """Categorical discrete action identifiers."""
+    """Categorical discrete action identifiers (306 total discrete actions)."""
 
     PASS = 0
     BUY_SHOP_0 = 1
@@ -25,17 +25,54 @@ class ActionType(IntEnum):
     REROLL_SHOP = 6
     BUY_EXP = 7
     TOGGLE_LOCK_SHOP = 8
-    SELL_BENCH = 9            # 9..17 (9 slots)
-    SELL_BOARD = 18           # 18..45 (28 hexes)
-    MOVE_BENCH_TO_BOARD = 46  # 46..297 (9 * 28 = 252)
-    MOVE_BOARD_TO_BENCH = 298 # 298..549 (28 * 9 = 252)
-    MOVE_BOARD_TO_BOARD = 550 # 550..1305 (28 * 27 = 756)
-    EQUIP_ITEM_BOARD = 1306   # 1306..1585 (10 * 28 = 280)
-    EQUIP_ITEM_BENCH = 1586   # 1586..1675 (10 * 9 = 90)
-    COMBINE_ITEMS = 1676      # 1676..1720 (45 combinations)
+    SELL_BENCH = 9             # 9..17 (9 bench slots)
+    SELL_BOARD = 18            # 18..29 (12 board team slots)
+    DEPLOY_BENCH_TO_BOARD = 30 # 30..38 (9 bench slots)
+    RECALL_BOARD_TO_BENCH = 39 # 39..50 (12 board team slots)
+    EQUIP_ITEM_BOARD = 51      # 51..170 (10 item slots * 12 board slots = 120)
+    EQUIP_ITEM_BENCH = 171     # 171..260 (10 item slots * 9 bench slots = 90)
+    COMBINE_ITEMS = 261        # 261..305 (45 component pairs)
 
 
-TOTAL_DISCRETE_ACTIONS = 1721
+TOTAL_DISCRETE_ACTIONS = 306
+
+ACTION_GROUP_NAMES = [
+    "Pass",
+    "Buy",
+    "Reroll",
+    "EXP",
+    "Lock",
+    "Sell",
+    "Deploy",
+    "Recall",
+    "Equip",
+    "Combine",
+]
+
+
+def get_action_group(action_id: int) -> str:
+    """Map discrete action ID (0..305) to high-level action group name."""
+    if action_id == 0:
+        return "Pass"
+    if 1 <= action_id <= 5:
+        return "Buy"
+    if action_id == 6:
+        return "Reroll"
+    if action_id == 7:
+        return "EXP"
+    if action_id == 8:
+        return "Lock"
+    if 9 <= action_id <= 29:
+        return "Sell"
+    if 30 <= action_id <= 38:
+        return "Deploy"
+    if 39 <= action_id <= 50:
+        return "Recall"
+    if 51 <= action_id <= 260:
+        return "Equip"
+    if 261 <= action_id <= 305:
+        return "Combine"
+    return "Unknown"
 
 
 def hex_to_index(r: int, c: int, cols: int = 7) -> int:
@@ -55,7 +92,7 @@ def execute_action(
     action_id: int,
     rng: random.Random | None = None,
 ) -> bool:
-    """Execute a discrete action on the player's state. Returns True if action succeeded."""
+    """Execute a discrete action (0..305) on the player's state. Returns True if action succeeded."""
     if action_id == 0:
         # PASS
         return True
@@ -83,57 +120,38 @@ def execute_action(
         bench_slot = action_id - 9
         return player.sell_unit(is_board=False, loc=bench_slot, pool=pool)
 
-    # 6. Sell Board (18..45)
-    if 18 <= action_id <= 45:
-        hex_idx = action_id - 18
-        pos = index_to_hex(hex_idx, set_data.board_cols)
-        return player.sell_unit(is_board=True, loc=pos, pool=pool)
+    # 6. Sell Board (18..29)
+    if 18 <= action_id <= 29:
+        board_slot = action_id - 18
+        return player.sell_board_slot(board_slot, pool=pool)
 
-    # 7. Move Bench to Board (46..297)
-    if 46 <= action_id <= 297:
-        offset = action_id - 46
-        bench_slot = offset // 28
-        hex_idx = offset % 28
-        pos = index_to_hex(hex_idx, set_data.board_cols)
-        return player.move_unit(from_is_board=False, from_loc=bench_slot, to_is_board=True, to_loc=pos)
+    # 7. Deploy Bench to Board (30..38)
+    if 30 <= action_id <= 38:
+        bench_slot = action_id - 30
+        return player.deploy_bench_slot(bench_slot)
 
-    # 8. Move Board to Bench (298..549)
-    if 298 <= action_id <= 549:
-        offset = action_id - 298
-        hex_idx = offset // 9
-        bench_slot = offset % 9
-        pos = index_to_hex(hex_idx, set_data.board_cols)
-        return player.move_unit(from_is_board=True, from_loc=pos, to_is_board=False, to_loc=bench_slot)
+    # 8. Recall Board to Bench (39..50)
+    if 39 <= action_id <= 50:
+        board_slot = action_id - 39
+        return player.recall_board_slot(board_slot)
 
-    # 9. Move Board to Board (550..1305)
-    if 550 <= action_id <= 1305:
-        offset = action_id - 550
-        src_hex_idx = offset // 27
-        dst_relative_idx = offset % 27
-        dst_hex_idx = dst_relative_idx if dst_relative_idx < src_hex_idx else dst_relative_idx + 1
-        src_pos = index_to_hex(src_hex_idx, set_data.board_cols)
-        dst_pos = index_to_hex(dst_hex_idx, set_data.board_cols)
-        return player.move_unit(from_is_board=True, from_loc=src_pos, to_is_board=True, to_loc=dst_pos)
+    # 9. Equip Item to Board Unit (51..170)
+    if 51 <= action_id <= 170:
+        offset = action_id - 51
+        item_idx = offset // 12
+        board_slot = offset % 12
+        return player.equip_item_to_board_slot(item_idx, board_slot)
 
-    # 10. Equip Item to Board Unit (1306..1585)
-    if 1306 <= action_id <= 1585:
-        offset = action_id - 1306
-        item_idx = offset // 28
-        hex_idx = offset % 28
-        pos = index_to_hex(hex_idx, set_data.board_cols)
-        return player.equip_item(item_idx, is_board=True, target_loc=pos)
-
-    # 11. Equip Item to Bench Unit (1586..1675)
-    if 1586 <= action_id <= 1675:
-        offset = action_id - 1586
+    # 10. Equip Item to Bench Unit (171..260)
+    if 171 <= action_id <= 260:
+        offset = action_id - 171
         item_idx = offset // 9
         bench_slot = offset % 9
         return player.equip_item(item_idx, is_board=False, target_loc=bench_slot)
 
-    # 12. Combine Items on Bench (1676..1720)
-    if 1676 <= action_id <= 1720:
-        offset = action_id - 1676
-        # Reconstruct (idx1, idx2) with idx1 < idx2 among 0..9
+    # 11. Combine Items on Bench (261..305)
+    if 261 <= action_id <= 305:
+        offset = action_id - 261
         comb_count = 0
         for i in range(10):
             for j in range(i + 1, 10):
@@ -145,7 +163,7 @@ def execute_action(
 
 
 def get_action_mask(player: Player, set_data: SetData) -> np.ndarray:
-    """Compute a fast boolean vector of valid discrete actions for the player."""
+    """Compute a fast boolean vector of valid discrete actions for the player (306 actions)."""
     mask = np.zeros(TOTAL_DISCRETE_ACTIONS, dtype=bool)
 
     if not player.alive:
@@ -168,98 +186,57 @@ def get_action_mask(player: Player, set_data: SetData) -> np.ndarray:
     if player.gold >= set_data.exp_buy_cost and player.level < set_data.max_level:
         mask[7] = True
 
-    # 8: Toggle lock
-    mask[8] = True
+    # 8: Toggle lock (only valid if shop is NOT already locked and contains champions)
+    if not player.shop.locked and any(c is not None for c in player.shop.slots):
+        mask[8] = True
 
-    # 9..17: Sell Bench
+    # 9..17: Sell Bench (0..8)
     for bench_idx, unit in enumerate(player.bench):
         if unit is not None:
             mask[9 + bench_idx] = True
 
-    # 18..45: Sell Board
-    for hex_idx in range(28):
-        pos = index_to_hex(hex_idx, set_data.board_cols)
-        if pos in player.board:
-            mask[18 + hex_idx] = True
+    # 18..29: Sell Board (0..11)
+    board_units = player.get_board_units_list()
+    for board_idx in range(len(board_units)):
+        if board_idx < 12:
+            mask[18 + board_idx] = True
 
-    # 46..297: Move Bench to Board
-    board_count = player.board_unit_count
-    max_board = player.max_board_units
-    can_place_new = board_count < max_board
+    # 30..38: Deploy Bench to Board (0..8)
+    if player.board_unit_count < player.max_board_units:
+        for bench_idx, unit in enumerate(player.bench):
+            if unit is not None:
+                mask[30 + bench_idx] = True
 
-    for bench_idx, unit in enumerate(player.bench):
-        if unit is not None:
-            for hex_idx in range(28):
-                pos = index_to_hex(hex_idx, set_data.board_cols)
-                dest_occupied = pos in player.board
-                if dest_occupied or can_place_new:
-                    action_id = 46 + (bench_idx * 28) + hex_idx
-                    mask[action_id] = True
+    # 39..50: Recall Board to Bench (0..11)
+    if player.free_bench_slots > 0:
+        for board_idx in range(len(board_units)):
+            if board_idx < 12:
+                mask[39 + board_idx] = True
 
-    # 298..549: Move Board to Bench
-    for hex_idx in range(28):
-        pos = index_to_hex(hex_idx, set_data.board_cols)
-        if pos in player.board:
-            for bench_idx in range(9):
-                action_id = 298 + (hex_idx * 9) + bench_idx
-                mask[action_id] = True
+    # 51..170: Equip Item to Board Unit (10 item slots * 12 board slots = 120)
+    for it_idx, it in enumerate(player.item_bench):
+        if it is not None and it_idx < 10:
+            for board_idx, u in enumerate(board_units):
+                if board_idx < 12 and len(u.items) < 3:
+                    mask[51 + (it_idx * 12) + board_idx] = True
 
-    # 550..1305: Move Board to Board
-    for src_hex_idx in range(28):
-        src_pos = index_to_hex(src_hex_idx, set_data.board_cols)
-        if src_pos in player.board:
-            for dst_relative_idx in range(27):
-                dst_hex_idx = dst_relative_idx if dst_relative_idx < src_hex_idx else dst_relative_idx + 1
-                action_id = 550 + (src_hex_idx * 27) + dst_relative_idx
-                mask[action_id] = True
+    # 171..260: Equip Item to Bench Unit (10 item slots * 9 bench slots = 90)
+    for it_idx, it in enumerate(player.item_bench):
+        if it is not None and it_idx < 10:
+            for bench_idx, u in enumerate(player.bench):
+                if u is not None and bench_idx < 9 and len(u.items) < 3:
+                    mask[171 + (it_idx * 9) + bench_idx] = True
 
-    # Items availability
-    num_items = len(player.item_bench)
-
-    # 1306..1585: Equip Item to Board
-    for item_idx in range(min(num_items, 10)):
-        item_inst = player.item_bench[item_idx]
-        for hex_idx in range(28):
-            pos = index_to_hex(hex_idx, set_data.board_cols)
-            target_unit = player.board.get(pos)
-            if target_unit is not None:
-                # Can equip if < 3 items, or can combine component
-                if len(target_unit.items) < 3:
-                    action_id = 1306 + (item_idx * 28) + hex_idx
-                    mask[action_id] = True
-                elif item_inst.is_component:
-                    # Check if target has an uncombined component
-                    has_comp = any(set_data.is_component(it) for it in target_unit.items)
-                    if has_comp:
-                        action_id = 1306 + (item_idx * 28) + hex_idx
-                        mask[action_id] = True
-
-    # 1586..1675: Equip Item to Bench
-    for item_idx in range(min(num_items, 10)):
-        item_inst = player.item_bench[item_idx]
-        for bench_slot in range(9):
-            target_unit = player.bench[bench_slot]
-            if target_unit is not None:
-                if len(target_unit.items) < 3:
-                    action_id = 1586 + (item_idx * 9) + bench_slot
-                    mask[action_id] = True
-                elif item_inst.is_component:
-                    has_comp = any(set_data.is_component(it) for it in target_unit.items)
-                    if has_comp:
-                        action_id = 1586 + (item_idx * 9) + bench_slot
-                        mask[action_id] = True
-
-    # 1676..1720: Combine Items on Bench
-    if num_items >= 2:
-        comb_count = 0
-        for i in range(10):
-            for j in range(i + 1, 10):
-                if i < num_items and j < num_items:
-                    item1 = player.item_bench[i]
-                    item2 = player.item_bench[j]
-                    if item1.is_component and item2.is_component:
-                        if set_data.get_recipe_result(item1.item_id, item2.item_id) is not None:
-                            mask[1676 + comb_count] = True
-                comb_count += 1
+    # 261..305: Combine Items on Bench (45 component pairs)
+    comb_count = 0
+    for i in range(10):
+        for j in range(i + 1, 10):
+            if i < len(player.item_bench) and j < len(player.item_bench):
+                it_a = player.item_bench[i]
+                it_b = player.item_bench[j]
+                if it_a and it_b and it_a.is_component and it_b.is_component:
+                    if set_data.get_recipe_result(it_a.item_id, it_b.item_id) is not None:
+                        mask[261 + comb_count] = True
+            comb_count += 1
 
     return mask

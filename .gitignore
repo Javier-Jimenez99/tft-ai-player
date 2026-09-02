@@ -15,3 +15,7 @@ data/
 # Simulation visual dashboards and reports
 dashboards/
 tft_simulation_dashboard*.html
+
+models/
+checkpoints/
+wandb/

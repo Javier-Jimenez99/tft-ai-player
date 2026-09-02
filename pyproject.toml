@@ -1,24 +1,28 @@
 [project]
 name = "tft-ai-player"
 version = "0.1.0"
-description = "Add your description here"
+description = "TFT AI Player with Multi-Modal Pre-trained Embeddings and Calibrated Round Winner Engine"
 readme = "README.md"
 authors = [
     { name = "javier-jimenezdelajara-int_nestle", email = "Javier.JimenezdelaJara@nestle.com" }
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
     "catboost>=1.2.0",
     "gymnasium>=1.0.0",
     "ipykernel>=6.29.0",
     "lightgbm>=4.7.0",
     "matplotlib>=3.8.0",
+    "nbclient>=0.11.0",
+    "nbformat>=5.11.1",
     "pandas>=2.2.0",
     "scikit-learn>=1.9.0",
     "scipy>=1.18.0",
     "seaborn>=0.13.0",
-    "torch>=2.13.0",
+    "torch>=2.0.0",
     "tqdm>=4.67",
+    "umap-learn>=0.5.12",
+    "wandb>=0.18.0",
     "xgboost>=3.4.0",
 ]
 
@@ -33,3 +37,11 @@ build-backend = "uv_build"
 dev = [
     "pytest>=9.1.1",
 ]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }

@@ -20,9 +20,11 @@ class TournamentEvaluator:
         self,
         league: LeagueManager,
         set_data: SetData | None = None,
+        combat_resolver: Any | None = None,
     ) -> None:
         self.league = league
         self.set_data = set_data or get_default_set17_data()
+        self.combat_resolver = combat_resolver
 
     def _resolve_bot_for_profile(self, profile: AgentProfile, model: Any | None = None) -> Any:
         """Resolve executable bot policy from agent profile."""
@@ -52,7 +54,7 @@ class TournamentEvaluator:
         assert num_players == 8, f"TFT lobby requires 8 players, got {num_players}"
 
         # Initialize game
-        game = TFTGame(set_data=self.set_data)
+        game = TFTGame(set_data=self.set_data, combat_resolver=self.combat_resolver) if self.combat_resolver else TFTGame(set_data=self.set_data)
         game.reset(seed=seed)
 
         # Build bot policies for each seat
@@ -166,3 +168,46 @@ class TournamentEvaluator:
             "win_rate": win_rate,
             "current_elo": self.league.profiles[candidate_agent_id].elo.rating,
         }
+
+    def run_tiered_benchmark(
+        self,
+        candidate_agent_id: str,
+        candidate_model: Any | None = None,
+        num_seeds_per_tier: int = 3,
+        base_seed: int = 1000,
+    ) -> dict[str, Any]:
+        """Evaluate agent against the 4-tier AlphaStar benchmark bot ladder.
+
+        Tier 1: RandomBot (900 Elo)
+        Tier 2: GreedyBankerBot (1100 Elo)
+        Tier 3: StandardTempoBot (1250 Elo)
+        Tier 4: Exploiter Bots (1400+ Elo)
+        """
+        tiers = {
+            "Tier1_Random": ["bot_random"],
+            "Tier2_Banker": ["bot_greedy_banker"],
+            "Tier3_Tempo": ["bot_standard_tempo"],
+            "Tier4_Exploiters": ["bot_hyper_roll_exploiter", "bot_fast9_econ_exploiter"],
+        }
+
+        results: dict[str, Any] = {}
+        all_placements: list[int] = []
+
+        for tier_name, bot_ids in tiers.items():
+            tier_res = self.run_paired_benchmark(
+                candidate_agent_id=candidate_agent_id,
+                opponent_agent_ids=bot_ids,
+                candidate_model=candidate_model,
+                num_seeds=num_seeds_per_tier,
+                base_seed=base_seed,
+            )
+            results[f"bench_{tier_name}_placement"] = tier_res["avg_placement"]
+            results[f"bench_{tier_name}_win_rate"] = tier_res["win_rate"]
+            results[f"bench_{tier_name}_top4_rate"] = tier_res["top4_rate"]
+            all_placements.extend(tier_res["placements"])
+
+        results["eval_avg_placement"] = float(sum(all_placements) / len(all_placements))
+        results["eval_win_rate"] = float(sum(1 for p in all_placements if p == 1) / len(all_placements))
+        results["eval_top4_rate"] = float(sum(1 for p in all_placements if p <= 4) / len(all_placements))
+        results["league_elo"] = self.league.profiles[candidate_agent_id].elo.rating
+        return results
