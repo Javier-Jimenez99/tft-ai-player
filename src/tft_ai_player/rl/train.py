@@ -563,6 +563,18 @@ class LeagueTrainer:
         if generation > 0 and generation % self.snapshot_interval == 0:
             snap_id = self.league.archive_snapshot("main_agent", generation, self.model.state_dict())
             print(f"  --> Archived Historical Snapshot: {snap_id}")
+            try:
+                from tft_ai_player.rl.visualization.strategy_landscape import generate_alphastar_progression_plot
+                viz_results = generate_alphastar_progression_plot(
+                    checkpoint_dir=self.checkpoint_dir,
+                    output_dir="reports/visualizations",
+                    formats=["png", "gif", "html"],
+                    fps=12,
+                    stride=max(1, generation // 70),
+                )
+                self.wandb_logger.log_strategy_progression(viz_results, step=generation)
+            except Exception as e:
+                logger.debug(f"Auto-refresh strategy progression plot: {e}")
 
         # 9. Log to WandB
         self.wandb_logger.log(metrics, step=generation)

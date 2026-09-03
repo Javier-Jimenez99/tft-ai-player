@@ -437,6 +437,44 @@ class WandBLogger:
         formatted_payload = format_wandb_payload(metrics)
         self.single_run.log(formatted_payload, step=step)
 
+    def log_strategy_progression(self, results: dict[str, Any], step: int) -> None:
+        """Upload AlphaStar strategy landscape progression artifacts (PNG, GIF, HTML) to Weights & Biases."""
+        if not self.enabled:
+            return
+        try:
+            import wandb
+            from pathlib import Path
+
+            if wandb.run is None and self.api_key:
+                os.environ["WANDB_API_KEY"] = self.api_key
+                wandb.init(
+                    project=self.project,
+                    entity=self.entity,
+                    id=self.run_id,
+                    resume="allow",
+                )
+
+            media_payload = {}
+            if "png" in results and Path(results["png"]).exists():
+                media_payload["Strategy/Landscape_Progression_PNG"] = wandb.Image(
+                    str(results["png"]), caption=f"AlphaStar Strategy Landscape (Gen {step})"
+                )
+            if "gif" in results and Path(results["gif"]).exists():
+                media_payload["Strategy/Progression_Animation_GIF"] = wandb.Video(
+                    str(results["gif"]), format="gif", caption=f"Training Trajectory across 8 Z-Index Clusters"
+                )
+            if "html" in results and Path(results["html"]).exists():
+                media_payload["Strategy/Interactive_Dashboard_HTML"] = wandb.Html(
+                    str(results["html"])
+                )
+
+            if media_payload and wandb.run is not None:
+                wandb.log(media_payload, step=step)
+                print(f"  [+] Logged AlphaStar strategy progression artifacts to WandB at step {step}!")
+        except Exception as e:
+            logger.debug(f"Could not upload strategy progression media to WandB: {e}")
+
     def close(self) -> None:
         if self.single_run is not None:
             self.single_run.close()
+

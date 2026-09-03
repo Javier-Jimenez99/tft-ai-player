@@ -36,6 +36,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_rl_train(args)
         if args.command == "rl-league":
             return _run_rl_league(args)
+        if args.command in ("rl-visualize-progression", "rl-plot-strategy", "rl-progression"):
+            return _run_rl_visualize_progression(args)
         if args.command == "pretrain-trunk":
             return _run_pretrain_trunk(args)
         if args.command in ("cluster-compositions", "cluster"):
@@ -303,11 +305,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="path to optional custom combat model checkpoint (.pt for Deep Learning GPU, or .joblib for LightGBM CPU). Defaults to fast GPU Deep Learning resolver.",
     )
+    default_ckpt_dir = "D:/tft-winner-data/set18/checkpoints" if Path("D:/tft-winner-data/set18").exists() else "checkpoints/league"
+
     rl_train_parser.add_argument(
         "--checkpoint-dir",
         type=str,
-        default="checkpoints/league",
-        help="directory to persist model weights, checkpoints, and league profiles (default: checkpoints/league)",
+        default=default_ckpt_dir,
+        help=f"directory to persist model weights, checkpoints, and league profiles (default: {default_ckpt_dir})",
     )
     rl_train_parser.add_argument(
         "--run-name",
@@ -369,14 +373,79 @@ def _build_parser() -> argparse.ArgumentParser:
     rl_league_parser.add_argument(
         "--checkpoint-dir",
         type=str,
-        default="checkpoints/league",
-        help="directory containing league checkpoints (default: checkpoints/league)",
+        default=default_ckpt_dir,
+        help=f"directory containing league checkpoints (default: {default_ckpt_dir})",
     )
     rl_league_parser.add_argument(
         "--markdown-out",
         type=str,
         default=None,
         help="optional destination file to write markdown leaderboard report",
+    )
+
+    viz_parser = subcommands.add_parser(
+        "rl-visualize-progression",
+        aliases=["rl-plot-strategy", "rl-progression"],
+        help="generate AlphaStar-style strategy space 2D progression animation and unit composition dashboard",
+    )
+    viz_parser.add_argument(
+        "--checkpoint-dir",
+        type=str,
+        default=default_ckpt_dir,
+        help=f"directory containing generation checkpoint history (default: {default_ckpt_dir})",
+    )
+    viz_parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="reports/visualizations",
+        help="directory to save exported visualization files (default: reports/visualizations)",
+    )
+    viz_parser.add_argument(
+        "--format",
+        type=str,
+        choices=["gif", "png", "html", "all"],
+        default="all",
+        help="export format: 'gif', 'png', 'html', or 'all' (default: all)",
+    )
+    viz_parser.add_argument(
+        "--fps",
+        type=int,
+        default=12,
+        help="frame rate for animated GIF (default: 12)",
+    )
+    viz_parser.add_argument(
+        "--stride",
+        type=int,
+        default=2,
+        help="generation sampling step stride (default: 2)",
+    )
+    viz_parser.add_argument(
+        "--agent-name",
+        type=str,
+        default="AlphaTFT-Main",
+        help="display name for the focal agent (default: AlphaTFT-Main)",
+    )
+    viz_parser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="automatically open the interactive HTML dashboard in browser",
+    )
+    viz_parser.add_argument(
+        "--wandb",
+        action="store_true",
+        help="upload generated progression artifacts to Weights & Biases",
+    )
+    viz_parser.add_argument(
+        "--wandb-project",
+        type=str,
+        default="tft-ai-league",
+        help="Weights & Biases project name (default: tft-ai-league)",
+    )
+    viz_parser.add_argument(
+        "--run-name",
+        type=str,
+        default="ppo_alphastar_v3",
+        help="Weights & Biases run name to attach media artifacts to (default: ppo_alphastar_v3)",
     )
 
     pretrain_parser = subcommands.add_parser(
@@ -1181,6 +1250,54 @@ def _run_rl_league(args: argparse.Namespace) -> int:
         report_md = generate_league_markdown_report(league)
         out_path.write_text(report_md, encoding="utf-8")
         print(f" [+] Markdown Leaderboard written to: file:///{out_path.as_posix()}")
+
+    return 0
+
+
+def _run_rl_visualize_progression(args: argparse.Namespace) -> int:
+    """Generate AlphaStar-style strategy landscape 2D progression and unit composition plots."""
+    from tft_ai_player.rl.visualization.strategy_landscape import generate_alphastar_progression_plot
+
+    print("\n" + "=" * 80)
+    print(" [TFT STRATEGY VISUALIZER] AlphaStar League Progression & Strategy Space")
+    print(f"  Checkpoint Dir: {args.checkpoint_dir} | Output Dir: {args.output_dir}")
+    print(f"  Format: {args.format.upper()} | FPS: {args.fps} | Stride: {args.stride}")
+    print("=" * 80 + "\n")
+
+    formats = ["gif", "png", "html"] if args.format == "all" else [args.format]
+    results = generate_alphastar_progression_plot(
+        checkpoint_dir=args.checkpoint_dir,
+        output_dir=args.output_dir,
+        formats=formats,
+        fps=args.fps,
+        stride=args.stride,
+        agent_name=args.agent_name,
+    )
+
+    print("\n[+] AlphaStar Strategy Progression generated successfully:")
+    for fmt, path in results.items():
+        print(f"  - [{fmt.upper()}] file:///{path.resolve().as_posix()}")
+
+    if getattr(args, "wandb", False):
+        try:
+            from pathlib import Path
+            from tft_ai_player.rl.logger import WandBLogger
+            wandb_logger = WandBLogger(
+                project=getattr(args, "wandb_project", "tft-ai-league"),
+                run_name=getattr(args, "run_name", "ppo_alphastar_v3"),
+                enabled=True,
+            )
+            gen_count = len(list(Path(args.checkpoint_dir).glob("gen_*"))) or 1
+            wandb_logger.log_strategy_progression(results, step=gen_count)
+        except Exception as e:
+            print(f" [!] WandB upload skipped: {e}")
+
+    if getattr(args, "open_browser", False) and "html" in results:
+        import webbrowser
+        try:
+            webbrowser.open(results["html"].resolve().as_uri())
+        except Exception:
+            pass
 
     return 0
 

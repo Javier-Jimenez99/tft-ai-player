@@ -160,25 +160,34 @@ class CheckpointManager:
         if not self.base_dir.exists():
             return None
 
-        # Check for unified root checkpoint first
-        root_ckpt = self.base_dir / "rl_training_checkpoint.pt"
-        if root_ckpt.exists():
-            return root_ckpt
-
         # Check gen_XXXX subdirectories sorted by generation number
         gen_dirs = []
         for d in self.base_dir.iterdir():
             if d.is_dir() and d.name.startswith("gen_"):
                 try:
                     g_num = int(d.name.replace("gen_", ""))
-                    gen_dirs.append((g_num, d))
+                    if (d / "training_state.pt").exists():
+                        gen_dirs.append((g_num, d))
                 except ValueError:
                     pass
         gen_dirs.sort(key=lambda x: x[0], reverse=True)
 
-        for _, g_dir in gen_dirs:
-            if (g_dir / "training_state.pt").exists():
-                return g_dir
+        root_ckpt = self.base_dir / "rl_training_checkpoint.pt"
+        if gen_dirs:
+            if root_ckpt.exists():
+                try:
+                    import torch
+                    root_data = torch.load(root_ckpt, map_location="cpu", weights_only=False)
+                    root_gen = root_data.get("generation", 0)
+                    if gen_dirs[0][0] > root_gen:
+                        return gen_dirs[0][1]
+                    return root_ckpt
+                except Exception:
+                    return gen_dirs[0][1]
+            return gen_dirs[0][1]
+
+        if root_ckpt.exists():
+            return root_ckpt
         return None
 
     def load_training_state(
