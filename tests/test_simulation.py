@@ -321,25 +321,20 @@ def test_gymnasium_env_compliance() -> None:
     env = gym.make("TFT-v0")
     obs, info = env.reset(seed=123)
 
-    assert isinstance(obs, dict)
-    assert "player_stats" in obs
-    assert "board" in obs
-    assert "action_mask" in obs
-    assert obs["action_mask"].shape == (TOTAL_DISCRETE_ACTIONS,)
-    assert obs["action_mask"][0] == True  # PASS is always valid
+    assert isinstance(obs, np.ndarray)
+    assert obs.shape == (704,)
+    assert "action_mask" in info
+    assert info["action_mask"].shape == (TOTAL_DISCRETE_ACTIONS,)
+    assert info["action_mask"][0] == True  # PASS is always valid
 
     # Step PASS action
     next_obs, reward, terminated, truncated, next_info = env.step(0)
     assert isinstance(reward, float)
     assert isinstance(terminated, bool)
     assert "stage" in next_info
+    assert next_obs.shape == (704,)
+    assert "reward_breakdown" in next_info
 
-    # Test flat observation mode
-    flat_env = TFTEnv(use_flat_obs=True)
-    flat_obs, flat_info = flat_env.reset(seed=123)
-    assert isinstance(flat_obs, np.ndarray)
-    assert flat_obs.ndim == 1
-    assert len(flat_obs) == flat_env.encoder.flat_observation_dim
 
 
 def test_stage_aware_carousel_draft(set_data: SetData, pool: ChampionPool) -> None:
@@ -421,7 +416,7 @@ def test_auto_fill_board_from_bench(set_data: SetData, pool: ChampionPool) -> No
 
 
 def test_round_win_loss_rewards_in_env(set_data: SetData) -> None:
-    """Verify gym_env awards significant positive rewards on round win and negative on round loss."""
+    """Verify gym_env awards multi-objective rewards (r_env, r_combat, r_interest, r_terminal, r_macro, r_micro)."""
     env = TFTEnv(set_data=set_data)
     obs, info = env.reset(seed=42)
 
@@ -429,8 +424,12 @@ def test_round_win_loss_rewards_in_env(set_data: SetData) -> None:
     obs, reward, term, trunc, info = env.step(0)
     assert "reward_breakdown" in info
     rb = info["reward_breakdown"]
-    assert "rew_round_win" in rb
-    assert "rew_round_loss" in rb
-    assert "block_combat_outcome" in rb
+    assert "r_env" in rb
+    assert "r_combat" in rb
+    assert "r_interest" in rb
+    assert "r_terminal" in rb
+    assert "r_macro" in rb
+    assert "r_micro" in rb
+
 
 

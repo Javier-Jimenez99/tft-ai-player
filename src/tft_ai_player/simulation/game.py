@@ -105,6 +105,9 @@ class TFTGame:
         if self.is_over:
             return []
 
+        # Execute planning phase policies for all alive AI bots
+        self.execute_bot_turns()
+
         rinfo = self.stage_manager.get_current_round_info()
         results: list[CombatResult] = []
 
@@ -173,6 +176,11 @@ class TFTGame:
             self.stage_manager.execute_round_start(self.players, self.pool, rng=self.rng)
 
         return results
+
+    def step_round(self) -> list[CombatResult]:
+        """Convenience alias for resolve_round_phase."""
+        return self.resolve_round_phase()
+
 
     def _check_and_process_eliminations(self) -> None:
         """Eliminate dead players, assign placements, and return units to pool."""

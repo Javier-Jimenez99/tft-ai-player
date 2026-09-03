@@ -186,7 +186,7 @@ class BoardHexTransformer(nn.Module):
             activation="relu",
             batch_first=True,
         )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers, enable_nested_tensor=False)
 
         self.trait_encoder = TraitEncoder(num_traits=num_traits, out_dim=64)
         self.fusion = nn.Sequential(
@@ -212,6 +212,9 @@ class BoardHexTransformer(nn.Module):
         if board_champ_ids is not None:
             flat_ids = board_champ_ids.view(batch_size, 28)
             key_padding_mask = (flat_ids == 0)
+            all_masked = key_padding_mask.all(dim=-1, keepdim=True)
+            if all_masked.any():
+                key_padding_mask = key_padding_mask & ~all_masked
             occupancy_mask = (flat_ids > 0).unsqueeze(-1).float()
         else:
             key_padding_mask = None
@@ -222,6 +225,7 @@ class BoardHexTransformer(nn.Module):
 
         # 2. Standard PyTorch Transformer Encoder
         x = self.transformer(x, src_key_padding_mask=key_padding_mask)
+
 
         # 3. Masked Mean Pooling over active units
         masked_tokens = x * occupancy_mask

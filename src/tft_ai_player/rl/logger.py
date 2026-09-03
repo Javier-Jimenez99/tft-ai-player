@@ -1,4 +1,4 @@
-"""Weights & Biases (WandB) experiment tracking and multi-agent metric logger for TFT RL."""
+"""Weights & Biases (WandB) experiment tracking, health telemetry, and executive dashboard logger for TFT RL."""
 
 from __future__ import annotations
 
@@ -15,8 +15,215 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def check_collapse_warnings(metrics: dict[str, Any]) -> list[str]:
+    """Check health metrics against collapse warning thresholds.
+
+    Returns human-readable diagnostic warnings if any training metric breaches safety bounds.
+    """
+    warnings: list[str] = []
+
+    # 1. Policy Entropy
+    entropy = metrics.get("policy_entropy")
+    if entropy is not None:
+        if entropy < 0.05:
+            warnings.append(
+                f"Entropy Collapse (entropy={entropy:.3f} < 0.05): Policy prematurely collapsing into single action."
+            )
+        elif entropy > 4.0:
+            warnings.append(
+                f"Entropy Anomaly (entropy={entropy:.3f} > 4.0): Policy failing to converge."
+            )
+
+    # 2. Explained Variance
+    exp_var = metrics.get("explained_variance")
+    if exp_var is not None and exp_var < 0.0:
+        warnings.append(
+            f"Critic Failure (explained_variance={exp_var:.3f} < 0.0): Value network corrupted."
+        )
+
+    # 3. Approximate KL
+    approx_kl = metrics.get("approx_kl")
+    if approx_kl is not None and approx_kl > 0.05:
+        warnings.append(
+            f"Policy Explosion (approx_kl={approx_kl:.4f} > 0.05): Policy update too aggressive."
+        )
+
+    # 4. Action Mask Rejection Rate
+    mask_rej = metrics.get("action_mask_rejection_rate")
+    if mask_rej is not None and mask_rej > 0.00001:
+        warnings.append(
+            f"Masking Leak (action_mask_rejection_rate={mask_rej:.4f} > 0.0%): Invalid actions leaking."
+        )
+
+    # 5. Macro Z Cosine
+    macro_z = metrics.get("macro_z_cosine")
+    if macro_z is not None and macro_z < 0.40:
+        warnings.append(
+            f"Specialist Divergence (macro_z_cosine={macro_z:.3f} < 0.40): Drifting off target archetype."
+        )
+
+    # 6. Micro World Model Cosine
+    micro_wm = metrics.get("micro_world_model_cosine")
+    if micro_wm is not None and micro_wm < 0.50:
+        warnings.append(
+            f"Macro Regression (micro_world_model_cosine={micro_wm:.3f} < 0.50): Diverging from planning trajectory."
+        )
+
+    return warnings
+
+
+def format_wandb_payload(raw_metrics: dict[str, Any]) -> dict[str, Any]:
+    """Format metrics into a clean, hierarchical structure with a 5-plot 'Principal' executive section.
+
+    The 'Principal' section contains at most 5 essential charts for immediate go/no-go assessment:
+    1. Principal/1_Average_Placement: Game placement performance (1.0 to 8.0, lower is better)
+    2. Principal/2_Critic_Explained_Variance: Critic value health (>0.50 is healthy, <0 is failure)
+    3. Principal/3_Policy_Entropy: Action exploration (2.5 -> 0.8 is healthy, <0.15 is collapse)
+    4. Principal/4_Policy_Stability_KL: PPO step stability (0.005 -> 0.02 is healthy, >0.05 is explosion)
+    5. Principal/5_Benchmark_WinRate: Overall win rate vs fixed benchmark bots (Alpha, Beta, Gamma)
+    """
+    payload: dict[str, Any] = {}
+
+    # =========================================================================
+    # SECTION 1: PRINCIPAL (Max 5 Executive Monitoring Plots)
+    # =========================================================================
+    # 1. Placement Performance
+    avg_place = raw_metrics.get("eval_avg_placement", raw_metrics.get("avg_placement"))
+    if avg_place is not None:
+        payload["Principal/1_Average_Placement"] = float(avg_place)
+
+    # 2. Critic Health
+    exp_var = raw_metrics.get("explained_variance")
+    if exp_var is not None:
+        payload["Principal/2_Critic_Explained_Variance"] = float(exp_var)
+
+    # 3. Policy Exploration / Entropy
+    entropy = raw_metrics.get("policy_entropy")
+    if entropy is not None:
+        payload["Principal/3_Policy_Entropy"] = float(entropy)
+
+    # 4. Policy Stability (Approx KL)
+    approx_kl = raw_metrics.get("approx_kl")
+    if approx_kl is not None:
+        payload["Principal/4_Policy_Stability_KL"] = float(approx_kl)
+
+    # 5. Benchmark Performance
+    bot_a_wr = raw_metrics.get("bot_alpha_win_rate")
+    bot_b_wr = raw_metrics.get("bot_beta_win_rate")
+    bot_g_wr = raw_metrics.get("bot_gamma_win_rate")
+    if bot_a_wr is not None and bot_b_wr is not None and bot_g_wr is not None:
+        avg_bot_wr = (float(bot_a_wr) + float(bot_b_wr) + float(bot_g_wr)) / 3.0
+        payload["Principal/5_Benchmark_WinRate"] = avg_bot_wr * 100.0
+    elif "mean_reward" in raw_metrics:
+        payload["Principal/5_Mean_Episode_Reward"] = float(raw_metrics["mean_reward"])
+
+    # =========================================================================
+    # SECTION 2: PERFORMANCE (Detailed Tournament & Match Metrics)
+    # =========================================================================
+    if "top4_rate" in raw_metrics and raw_metrics["top4_rate"] is not None:
+        payload["Performance/Top4_Rate"] = float(raw_metrics["top4_rate"]) * 100.0
+    if "win_rate" in raw_metrics and raw_metrics["win_rate"] is not None:
+        payload["Performance/Win_Rate"] = float(raw_metrics["win_rate"]) * 100.0
+    if "mean_reward" in raw_metrics and raw_metrics["mean_reward"] is not None:
+        payload["Performance/Mean_Reward"] = float(raw_metrics["mean_reward"])
+    if "eval_top4_rate" in raw_metrics and raw_metrics["eval_top4_rate"] is not None:
+        payload["Performance/Eval_Top4_Rate"] = float(raw_metrics["eval_top4_rate"]) * 100.0
+    if "eval_win_rate" in raw_metrics and raw_metrics["eval_win_rate"] is not None:
+        payload["Performance/Eval_Win_Rate"] = float(raw_metrics["eval_win_rate"]) * 100.0
+    if "bot_alpha_win_rate" in raw_metrics and raw_metrics["bot_alpha_win_rate"] is not None:
+        payload["Performance/Bot_Alpha_Fast8_WinRate"] = float(raw_metrics["bot_alpha_win_rate"]) * 100.0
+    if "bot_beta_win_rate" in raw_metrics and raw_metrics["bot_beta_win_rate"] is not None:
+        payload["Performance/Bot_Beta_Hyperroll_WinRate"] = float(raw_metrics["bot_beta_win_rate"]) * 100.0
+    if "bot_gamma_win_rate" in raw_metrics and raw_metrics["bot_gamma_win_rate"] is not None:
+        payload["Performance/Bot_Gamma_Greedy_WinRate"] = float(raw_metrics["bot_gamma_win_rate"]) * 100.0
+    if "league_elo" in raw_metrics and raw_metrics["league_elo"] is not None:
+        payload["Performance/League_Elo"] = float(raw_metrics["league_elo"])
+
+    # =========================================================================
+    # SECTION 3: OPTIMIZATION (Gradients, Losses, Learning Rates)
+    # =========================================================================
+    if "policy_loss" in raw_metrics and raw_metrics["policy_loss"] is not None:
+        payload["Optimization/Policy_Loss"] = float(raw_metrics["policy_loss"])
+    if "value_loss" in raw_metrics and raw_metrics["value_loss"] is not None:
+        payload["Optimization/Value_Loss"] = float(raw_metrics["value_loss"])
+    if "entropy_loss" in raw_metrics and raw_metrics["entropy_loss"] is not None:
+        payload["Optimization/Entropy_Loss"] = float(raw_metrics["entropy_loss"])
+    if "total_loss" in raw_metrics and raw_metrics["total_loss"] is not None:
+        payload["Optimization/Total_Loss"] = float(raw_metrics["total_loss"])
+    if "learning_rate" in raw_metrics and raw_metrics["learning_rate"] is not None:
+        payload["Optimization/Learning_Rate"] = float(raw_metrics["learning_rate"])
+    if "entropy_coef" in raw_metrics and raw_metrics["entropy_coef"] is not None:
+        payload["Optimization/Entropy_Coef"] = float(raw_metrics["entropy_coef"])
+
+    # =========================================================================
+    # SECTION 4: DIAGNOSTICS & ALIGNMENT (Action Masking, Z-Index, World Model)
+    # =========================================================================
+    if "action_mask_rejection_rate" in raw_metrics and raw_metrics["action_mask_rejection_rate"] is not None:
+        payload["Diagnostics/Action_Mask_Rejection_Rate"] = float(raw_metrics["action_mask_rejection_rate"]) * 100.0
+    if "macro_z_cosine" in raw_metrics and raw_metrics["macro_z_cosine"] is not None:
+        payload["Diagnostics/Macro_Z_Cosine"] = float(raw_metrics["macro_z_cosine"])
+    if "micro_world_model_cosine" in raw_metrics and raw_metrics["micro_world_model_cosine"] is not None:
+        payload["Diagnostics/Micro_World_Model_Cosine"] = float(raw_metrics["micro_world_model_cosine"])
+    if "current_beta" in raw_metrics and raw_metrics["current_beta"] is not None:
+        payload["Diagnostics/Reward_Beta_Weight"] = float(raw_metrics["current_beta"])
+    if "current_alpha" in raw_metrics and raw_metrics["current_alpha"] is not None:
+        payload["Diagnostics/Reward_Alpha_Weight"] = float(raw_metrics["current_alpha"])
+    if "actions_per_round" in raw_metrics and raw_metrics["actions_per_round"] is not None:
+        payload["Diagnostics/Actions_Per_Round"] = float(raw_metrics["actions_per_round"])
+
+    # =========================================================================
+    # SECTION 5: REWARD BLOCKS (Complete Multi-Objective Decomposition)
+    # =========================================================================
+    if "reward_breakdown" in raw_metrics and isinstance(raw_metrics["reward_breakdown"], dict):
+        rb = raw_metrics["reward_breakdown"]
+        key_mapping = {
+            "r_combat": "Rewards/1_Combat_HP_Reward",
+            "r_interest": "Rewards/2_Interest_Gold_Reward",
+            "r_terminal": "Rewards/3_Placement_Terminal_Reward",
+            "r_micro": "Rewards/4_Micro_Transition_Alignment",
+            "r_macro": "Rewards/5_Macro_Cluster_Strategy",
+            "r_env": "Rewards/6_Total_Environment_Game_Reward",
+        }
+        for k, v in rb.items():
+            if isinstance(v, (int, float)):
+                dest_name = key_mapping.get(k, f"Rewards/{k}")
+                payload[dest_name] = float(v)
+
+    # =========================================================================
+    # SECTION 6: ACTIONS (Action Distribution Breakdown %)
+    # =========================================================================
+    if "action_buy_xp_pct" in raw_metrics and raw_metrics["action_buy_xp_pct"] is not None:
+        payload["Actions/1_Buy_XP_Pct"] = float(raw_metrics["action_buy_xp_pct"])
+    if "action_pass_pct" in raw_metrics and raw_metrics["action_pass_pct"] is not None:
+        payload["Actions/2_Pass_Round_Pct"] = float(raw_metrics["action_pass_pct"])
+    if "action_equip_item_pct" in raw_metrics and raw_metrics["action_equip_item_pct"] is not None:
+        payload["Actions/3_Equip_Item_Pct"] = float(raw_metrics["action_equip_item_pct"])
+    if "action_buy_shop_pct" in raw_metrics and raw_metrics["action_buy_shop_pct"] is not None:
+        payload["Actions/4_Buy_Shop_Pct"] = float(raw_metrics["action_buy_shop_pct"])
+    if "action_deploy_board_pct" in raw_metrics and raw_metrics["action_deploy_board_pct"] is not None:
+        payload["Actions/5_Deploy_Board_Pct"] = float(raw_metrics["action_deploy_board_pct"])
+    if "action_reroll_pct" in raw_metrics and raw_metrics["action_reroll_pct"] is not None:
+        payload["Actions/6_Reroll_Shop_Pct"] = float(raw_metrics["action_reroll_pct"])
+    # =========================================================================
+    # SECTION 7: COMPOSITIONS & Z-INDEX MASTERY
+    # =========================================================================
+    if "macro_alignment_cosine" in raw_metrics and raw_metrics["macro_alignment_cosine"] is not None:
+        payload["Compositions/1_Macro_Alignment_Cosine"] = float(raw_metrics["macro_alignment_cosine"])
+    if "target_cluster_match_rate" in raw_metrics and raw_metrics["target_cluster_match_rate"] is not None:
+        payload["Compositions/2_Target_Cluster_Match_Rate"] = float(raw_metrics["target_cluster_match_rate"])
+
+    # =========================================================================
+    # SECTION 8: UNIVERSAL GOAL-CONDITIONED EXPLOITER METRICS
+    # =========================================================================
+    for k, v in raw_metrics.items():
+        if k.startswith("Exploiter/") and isinstance(v, (int, float)):
+            payload[k] = float(v)
+
+    return payload
+
+
 class WandBSingleRun:
-    """Represents a single autonomous WandB run within a multi-agent league group."""
+    """Represents a single autonomous WandB run using native FileStream & GraphQL."""
 
     def __init__(
         self,
@@ -37,7 +244,7 @@ class WandBSingleRun:
         self.stream_offset = 0
         self.dashboard_url = f"https://wandb.ai/{self.entity}/{self.project}/runs/{self.run_id}"
 
-        # Initialize run via WandB GraphQL UpsertBucket
+        # Upsert bucket
         mutation = """
         mutation UpsertBucket($input: UpsertBucketInput!) {
             upsertBucket(input: $input) {
@@ -69,11 +276,14 @@ class WandBSingleRun:
         urllib.request.urlopen(req, timeout=10)
 
     def log(self, metrics: dict[str, Any], step: int) -> None:
-        """Stream metrics to WandB FileStream API and update summaryMetrics index."""
+        """Stream metrics to WandB FileStream API."""
         try:
             payload = dict(metrics)
             payload["_step"] = step
             payload["_runtime"] = time.time()
+            if self.stream_offset < step:
+                self.stream_offset = step
+
             basic_auth = base64.b64encode(f"api:{self.api_key}".encode("utf-8")).decode("ascii")
             fs_headers = {
                 "Content-Type": "application/json",
@@ -94,14 +304,11 @@ class WandBSingleRun:
             )
             urllib.request.urlopen(fs_req, timeout=5)
             self.stream_offset += 1
-
-            # Update summaryMetrics via GraphQL on every step so WandB UI dropdowns index all metric keys
             self._update_summary(payload)
         except Exception as e:
             logger.debug(f"Direct WandB stream error for {self.run_id}: {e}")
 
     def _update_summary(self, summary_dict: dict[str, Any]) -> None:
-        """Update summaryMetrics in WandB to populate UI panel selectors."""
         try:
             mutation = """
             mutation UpsertBucket($input: UpsertBucketInput!) {
@@ -132,17 +339,13 @@ class WandBSingleRun:
             pass
 
     def close(self) -> None:
-        """Mark run complete."""
         try:
             basic_auth = base64.b64encode(f"api:{self.api_key}".encode("utf-8")).decode("ascii")
             fs_headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Basic {basic_auth}",
             }
-            fs_payload = {
-                "complete": True,
-                "exitcode": 0,
-            }
+            fs_payload = {"complete": True, "exitcode": 0}
             fs_req = urllib.request.Request(
                 f"https://api.wandb.ai/files/{self.entity}/{self.project}/{self.run_id}/file_stream",
                 data=json.dumps(fs_payload).encode("utf-8"),
@@ -154,13 +357,7 @@ class WandBSingleRun:
 
 
 class WandBLogger:
-    """Manages grouped multi-agent WandB runs for Tri-Tier RL League.
-
-    Creates 3 parallel runs under the same Group container (run-name):
-    1. <run-name>_main_agent       (Role: Main Agent / Generalist)
-    2. <run-name>_main_exploiter   (Role: Main Exploiter / Hyper-Roll)
-    3. <run-name>_league_exploiter (Role: League Exploiter / Fast-8/9)
-    """
+    """WandB Logger for TFT Reinforcement Learning and AlphaStar League."""
 
     def __init__(
         self,
@@ -170,37 +367,40 @@ class WandBLogger:
         run_name: str | None = None,
         run_id: str | None = None,
         config: dict[str, Any] | None = None,
-        resume: str | None = None,
         enabled: bool = True,
     ) -> None:
         self.project = project
-        self.group = group or run_name or "ppo_tri_tier_league_v1"
+        self.group = group or run_name or "ppo_league_v1"
         self.run_name = run_name or self.group
         self.run_id = run_id or self.run_name
         self.enabled = enabled
         self.api_key: str | None = None
         self.entity: str = entity or ""
-        self.agent_runs: dict[str, WandBSingleRun] = {}
-        self.group_url: str | None = None
+        self.single_run: WandBSingleRun | None = None
 
         if not self.enabled:
             return
 
         try:
             self._resolve_credentials()
-            self._init_tri_tier_runs(base_config=config or {})
+            self.single_run = WandBSingleRun(
+                project=self.project,
+                entity=self.entity,
+                group=self.group,
+                display_name=self.run_name,
+                run_id=self.run_id,
+                config=config,
+                api_key=self.api_key,
+            )
+            print(f"  [WandB Run] {self.run_name}: {self.single_run.dashboard_url}")
         except Exception as e:
-            logger.warning(f"Could not initialize WandB Grouped Runs: {e}. Running in local logging mode.")
+            logger.warning(f"Could not initialize WandB run: {e}. Running in local logging mode.")
             self.enabled = False
 
     def _resolve_credentials(self) -> None:
-        """Resolve WandB API key and entity."""
         self.api_key = os.environ.get("WANDB_API_KEY")
         if not self.api_key:
-            netrc_paths = [
-                os.path.expanduser("~/_netrc"),
-                os.path.expanduser("~/.netrc"),
-            ]
+            netrc_paths = [os.path.expanduser("~/_netrc"), os.path.expanduser("~/.netrc")]
             for np in netrc_paths:
                 if os.path.exists(np):
                     try:
@@ -215,7 +415,6 @@ class WandBLogger:
         if not self.api_key:
             raise ValueError("WandB API key not found in environment or netrc.")
 
-        # Query entity from API
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
@@ -231,123 +430,13 @@ class WandBLogger:
         if resolved_entity and not self.entity:
             self.entity = resolved_entity
 
-    def _init_tri_tier_runs(self, base_config: dict[str, Any]) -> None:
-        """Initialize the 3 parallel runs grouped under self.group."""
-        agents_spec = [
-            ("Main_Agent", "main_agent", "Main Agent (Generalist)", "generalist"),
-            ("Main_Exploiter", "main_exploiter", "Main Exploiter (Hyper-Roll)", "hyper_roll"),
-            ("League_Exploiter", "league_exploiter", "League Exploiter (Fast-8/9)", "fast8_flex"),
-        ]
-
-        print(f"  [WandB] Project: {self.project} | Group: {self.group}")
-        for agent_key, suffix, display_suffix, archetype in agents_spec:
-            agent_run_id = f"{self.run_name}_{suffix}"
-            agent_display_name = f"{self.run_name} ({display_suffix})"
-            agent_cfg = dict(base_config)
-            agent_cfg["agent_name"] = agent_key
-            agent_cfg["archetype"] = archetype
-            agent_cfg["league_group"] = self.group
-
-            run_obj = WandBSingleRun(
-                project=self.project,
-                entity=self.entity,
-                group=self.group,
-                display_name=agent_display_name,
-                run_id=agent_run_id,
-                config=agent_cfg,
-                api_key=self.api_key,
-            )
-            self.agent_runs[agent_key] = run_obj
-            print(f"  [WandB Run] {agent_key:<16}: {run_obj.dashboard_url}")
-
-        self.group_url = f"https://wandb.ai/{self.entity}/{self.project}/groups/{self.group}"
-        print(f"  [WandB Group View] Overlaid Charts Dashboard: {self.group_url}")
-
-    def log_generation(self, generation: int, metrics: dict[str, Any]) -> None:
-        """Log generation metrics individually to each of the 3 grouped runs."""
-        if not self.enabled or not self.agent_runs:
+    def log(self, metrics: dict[str, Any], step: int) -> None:
+        """Format and log metrics dictionary at given step/generation with the 5 Principal plots."""
+        if not self.enabled or self.single_run is None:
             return
-
-        tri_tier = metrics.get("tri_tier", {})
-        if not isinstance(tri_tier, dict):
-            return
-
-        for agent_key, agent_run in self.agent_runs.items():
-            agent_data = tri_tier.get(agent_key)
-            if not isinstance(agent_data, dict):
-                continue
-
-            payload: dict[str, Any] = {
-                "generation": generation,
-            }
-
-            # 1. Performance & Value
-            if "elo" in agent_data and agent_data["elo"] is not None:
-                payload["Performance/Elo"] = float(agent_data["elo"])
-            if "mean_reward" in agent_data and agent_data["mean_reward"] is not None:
-                payload["Performance/Mean_Reward"] = float(agent_data["mean_reward"])
-            if "avg_placement" in agent_data and agent_data["avg_placement"] is not None:
-                payload["Performance/Avg_Placement"] = float(agent_data["avg_placement"])
-
-            # 2. Optimization Losses & Entropy
-            if "loss" in agent_data and agent_data["loss"] is not None:
-                payload["Optimization/Total_Loss"] = float(agent_data["loss"])
-            if "policy_loss" in agent_data and agent_data["policy_loss"] is not None:
-                payload["Optimization/Policy_Loss"] = float(agent_data["policy_loss"])
-            if "value_loss" in agent_data and agent_data["value_loss"] is not None:
-                payload["Optimization/Value_Loss"] = float(agent_data["value_loss"])
-            if "entropy" in agent_data and agent_data["entropy"] is not None:
-                payload["Optimization/Entropy"] = float(agent_data["entropy"])
-            if "explained_variance" in agent_data and agent_data["explained_variance"] is not None:
-                payload["Optimization/Explained_Variance"] = float(agent_data["explained_variance"])
-
-            # 3. Action Distributions
-            act_dist = agent_data.get("action_distribution")
-            if isinstance(act_dist, dict):
-                for act_name, pct in act_dist.items():
-                    payload[f"Action_Dist/{act_name}"] = float(pct) * 100.0
-
-            # 4. Turn Efficiency
-            if "actions_per_round" in agent_data:
-                payload["Turn_Efficiency/APM"] = float(agent_data["actions_per_round"])
-            if "pass_clean_econ_rate" in agent_data:
-                payload["Turn_Efficiency/Clean_Econ_Pass_Rate"] = float(agent_data["pass_clean_econ_rate"]) * 100.0
-            if "pass_missed_craft_rate" in agent_data:
-                payload["Turn_Efficiency/Missed_Craft_Rate"] = float(agent_data["pass_missed_craft_rate"]) * 100.0
-            if "pass_missed_upgrade_rate" in agent_data:
-                payload["Turn_Efficiency/Missed_Upgrade_Rate"] = float(agent_data["pass_missed_upgrade_rate"]) * 100.0
-
-            # 5. Reward Blocks
-            for blk in ["block_combat_outcome", "block_board_power", "block_constraints_economy", "block_economy", "block_experience", "block_board_building", "block_combat", "block_placement"]:
-                if blk in agent_data:
-                    payload[f"Rewards_Blocks/{blk.replace('block_', '').title()}"] = float(agent_data[blk])
-
-            # 6. Micro-Rewards
-            for rew in ["rew_round_win", "rew_round_loss", "rew_potential_delta", "rew_elimination_bounty", "rew_interest", "rew_pair_shop_buy", "rew_level_up", "rew_star_2", "rew_star_3", "rew_item_slam", "rew_synergy_tier", "rew_hp_loss", "rew_stage_survival", "rew_placement"]:
-                if rew in agent_data:
-                    payload[f"Rewards_Micro/{rew.replace('rew_', '').title()}"] = float(agent_data[rew])
-
-            # 7. Standardized Static Benchmark Ladder (Logged to Main Agent)
-            if agent_key == "Main_Agent":
-                bench_keys = [
-                    ("Benchmark_Placement/Tier1_Random", "bench_Tier1_Random_placement"),
-                    ("Benchmark_WinRate/Tier1_Random", "bench_Tier1_Random_win_rate"),
-                    ("Benchmark_Placement/Tier2_Banker", "bench_Tier2_Banker_placement"),
-                    ("Benchmark_WinRate/Tier2_Banker", "bench_Tier2_Banker_win_rate"),
-                    ("Benchmark_Placement/Tier3_Tempo", "bench_Tier3_Tempo_placement"),
-                    ("Benchmark_WinRate/Tier3_Tempo", "bench_Tier3_Tempo_win_rate"),
-                    ("Benchmark_Placement/Tier4_Exploiters", "bench_Tier4_Exploiters_placement"),
-                    ("Benchmark_WinRate/Tier4_Exploiters", "bench_Tier4_Exploiters_win_rate"),
-                ]
-                for tag, key in bench_keys:
-                    if key in metrics and metrics[key] is not None:
-                        payload[tag] = float(metrics[key])
-
-            # Stream payload to this agent's run
-            agent_run.log(payload, step=generation)
+        formatted_payload = format_wandb_payload(metrics)
+        self.single_run.log(formatted_payload, step=step)
 
     def close(self) -> None:
-        """Finish and close all 3 grouped runs."""
-        for run_obj in self.agent_runs.values():
-            run_obj.close()
-
+        if self.single_run is not None:
+            self.single_run.close()

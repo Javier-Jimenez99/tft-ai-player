@@ -216,10 +216,17 @@ class TraitVocabulary:
         self.idx_to_trait[new_idx] = norm_name
         return new_idx
 
+    def encode(self, name: str | None) -> int:
+        """Encode trait string to numeric integer index."""
+        if not name:
+            return 0
+        return self.add_trait(name)
+
     def lookup(self, key: int | str) -> str | int:
         if isinstance(key, (int, np.integer)):
             return self.idx_to_trait.get(int(key), "")
         return self.trait_to_idx.get(str(key), 0)
+
 
     def __len__(self) -> int:
         return len(self.trait_to_idx)

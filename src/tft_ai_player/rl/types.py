@@ -4,21 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any
 import numpy as np
-
 
 from tft_ai_player.simulation.config import AgentArchetype
 
 
 class AgentRole(str, Enum):
-    """Categorical role of an agent within the AlphaStar-style League."""
+    """Categorical role of an agent within the AlphaStar League."""
 
-    MAIN = "main"                     # Continuously learning agent via PPO
-    MAIN_EXPLOITER = "main_exploiter" # Specialized to find and punish weaknesses in main agents
-    LEAGUE_EXPLOITER = "league_exploiter" # Robust global exploiter
-    HALL_OF_FAME = "hall_of_fame"     # Frozen past checkpoints to prevent catastrophic forgetting
-    BASELINE = "baseline"             # Deterministic / heuristic reference bots (e.g. StandardTempoBot)
+    MAIN = "main"                     # Persistent non-resetting generalist agent
+    EXPLOITER = "exploiter"           # Specialist agent locked to specific Z-Index target z_k
+    HISTORICAL = "historical"         # Frozen historical snapshot (archived every 50 generations)
+    BASELINE = "baseline"             # Hardcoded benchmark bots (Bot Alpha, Bot Beta, Bot Gamma)
 
 
 @dataclass
@@ -71,6 +69,8 @@ class AgentProfile:
     name: str
     role: AgentRole
     archetype: AgentArchetype = AgentArchetype.GENERALIST
+    target_z: np.ndarray | None = None
+    target_z_index: int | None = None
     elo: EloRating = field(default_factory=EloRating)
     checkpoint_path: str | None = None
     generation: int = 0
@@ -99,44 +99,7 @@ class MatchResult:
     """Complete summary of an 8-player TFT lobby match."""
 
     match_id: str
-    seed: int
-    placements: dict[str, int]        # agent_id -> placement (1..8)
-    scores: dict[str, float]          # agent_id -> normalized tournament score
-    total_rounds: int
-    elo_deltas: dict[str, float] = field(default_factory=dict)
+    placements: dict[str, int]  # agent_id -> placement (1..8)
+    scores: dict[str, float] = field(default_factory=dict)
+    rounds_survived: dict[str, int] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class RolloutTransition:
-    """Single-step transition data for PPO buffer."""
-
-    obs: np.ndarray
-    action: int
-    reward: float
-    done: bool
-    value: float
-    log_prob: float
-    action_mask: np.ndarray
-
-
-class AgentPolicyProtocol(Protocol):
-    """Protocol for RL agent policy interface."""
-
-    def select_action(
-        self,
-        obs: np.ndarray,
-        action_mask: np.ndarray,
-        deterministic: bool = False,
-    ) -> tuple[int, float, float]:
-        """Select action given observation and action mask. Returns (action, log_prob, value)."""
-        ...
-
-    def evaluate_actions(
-        self,
-        obs: np.ndarray,
-        actions: np.ndarray,
-        action_masks: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Evaluate log probs, values, and entropy for a batch of transitions."""
-        ...

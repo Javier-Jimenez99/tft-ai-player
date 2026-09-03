@@ -98,10 +98,11 @@ class MultilateralEloSystem:
 
     def generate_leaderboard(
         self,
-        profiles: Sequence[AgentProfile],
+        profiles: Sequence[AgentProfile] | dict[str, AgentProfile],
     ) -> list[dict[str, Any]]:
         """Sort and summarize agent profiles for leaderboard display."""
-        sorted_profiles = sorted(profiles, key=lambda p: p.elo.rating, reverse=True)
+        prof_list = list(profiles.values()) if isinstance(profiles, dict) else list(profiles)
+        sorted_profiles = sorted(prof_list, key=lambda p: p.elo.rating, reverse=True)
         leaderboard: list[dict[str, Any]] = []
 
         for rank, prof in enumerate(sorted_profiles, 1):
@@ -120,3 +121,4 @@ class MultilateralEloSystem:
             )
 
         return leaderboard
+

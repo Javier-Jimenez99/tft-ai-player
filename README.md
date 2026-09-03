@@ -189,20 +189,33 @@ print(f"Predicted Win Probability: {win_probability * 100:.1f}%")
 # Output: Predicted Win Probability: 91.4%
 ```
 
-### 5. Train RL Agents & Run Multi-Agent League
+### 5. Train RL Agents & Run AlphaStar League
 
 ```powershell
 # Run 10 tournament matches across league bots and print Elo standings
 uv run tft-ai-player rl-league --matches 10
 
 # Train the autonomous agent using Maskable PPO and League Self-Play
-uv run tft-ai-player rl-train --generations 20 --rollout-steps 512 --eval-every 2
+uv run tft-ai-player rl-train `
+    --generations 50 `
+    --rollout-steps 4096 `
+    --batch-size 512 `
+    --epochs 4 `
+    --lr 2.5e-4 `
+    --eval-every 25 `
+    --wandb-project "tft-ai-league" `
+    --run-name "ppo_alphastar_v1"
 
 # Export a markdown leaderboard report
 uv run tft-ai-player rl-league --matches 20 --markdown-out docs/leaderboard.md
 ```
 
-> 📖 **Deep Technical Architecture**: See [`docs/rl_models_and_league.md`](docs/rl_models_and_league.md) for full documentation on entity embeddings, invalid action masking across 1,721 micro-actions, GAE-$\lambda$ variance reduction, paired-seed luck mitigation, and 8-player multilateral Elo rating mathematics.
+> 📖 **Deep Technical Architecture**: See [`docs/rl_models_and_league.md`](docs/rl_models_and_league.md) and [`docs/model_architectures.md`](docs/model_architectures.md) for full documentation on:
+> * **704D Invariant State Encoder:** Frozen Spatial Trunk (320D) + Shop (64D) + Bench (64D) + Target Macro Z-Index (256D).
+> * **111 Semantic Discrete Actions:** Strict $-10^9$ pre-softmax masking with zero illegal state transitions.
+> * **Multi-Objective Rewards:** Environment rewards ($R_{\text{env}}$) + Macro Strategy Alignment ($\alpha R_{\text{macro}}$) + Micro World Model Alignment ($\beta R_{\text{micro}}$).
+> * **Executive WandB Dashboard:** 5 core plots under `Principal` for real-time training health monitoring.
+> * **Combat Engine Benchmarking:** Deep Learning on GPU achieves **33.8% faster total training time** (1.51x system speedup) and **16.1x faster per-match latent combat resolution**.
 
 ### 6. Run Tests
 ```powershell
@@ -214,15 +227,18 @@ uv run pytest tests/
 ## 🗺️ Roadmap
 
 - [x] **Subsystem 1: Round Winner Predictor (`round_winner`)**
-  - High-resolution combat feature extractor (1,500+ features).
+  - High-resolution combat feature extractor (1,107 features).
   - Fast LightGBM & XGBoost training with smooth Platt probability calibration.
   - Benchmarked against MetaTFT across 179,000+ rounds.
   - Model serialization and lightweight inference engine.
-- [x] **Subsystem 2: Autonomous Reinforcement Learning & League Engine (`rl`)**
-  - Multi-modal Actor-Critic neural network (`TFTActorCritic`) with entity embeddings.
-  - Maskable PPO with Generalized Advantage Estimation (GAE-$\lambda$) across 1,721 actions.
-  - AlphaStar-inspired League system with Prioritized Fictitious Self-Play (PFSP) matchmaking.
+- [x] **Subsystem 2: Autonomous Reinforcement Learning & AlphaStar League (`rl`)**
+  - Multi-modal Actor-Critic neural network (`TFTActorCritic`) with 704D state representation.
+  - Maskable PPO with Generalized Advantage Estimation (GAE-$\lambda$) across 111 discrete semantic actions.
+  - Multi-Objective Reward Engine ($R_{\text{env}} + \alpha R_{\text{macro}} + \beta R_{\text{micro}}$).
+  - AlphaStar-inspired League system with 15 Specialist Exploiters and Prioritized Fictitious Self-Play (PFSP) matchmaking.
   - Multilateral 8-player Elo rating system with pairwise decomposition and Top-4 statistics.
-  - Paired-seed Common Random Numbers (CRN) benchmark to isolate strategy from TFT luck.
+  - Deterministic benchmark bots (`BotAlphaFast8`, `BotBetaHyperroll`, `BotGammaGreedy`).
+  - Executive WandB monitoring dashboard (`Principal` 5-plot cockpit).
 - [ ] **Subsystem 3: Live Game Computer Vision & Ingestion (`vision`)**
   - Screen capture / Game state ingestion and automated action execution.
+

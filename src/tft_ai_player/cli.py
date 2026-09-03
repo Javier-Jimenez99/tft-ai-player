@@ -235,61 +235,85 @@ def _build_parser() -> argparse.ArgumentParser:
 
     rl_train_parser = subcommands.add_parser(
         "rl-train",
-        help="train autonomous RL agent using Maskable PPO and League Self-Play",
+        help="train autonomous RL agent using Maskable PPO and AlphaStar League Pipeline",
     )
     rl_train_parser.add_argument(
         "--generations",
         type=int,
-        default=5,
-        help="number of training iterations/generations to run (default: 5)",
+        default=50,
+        help="number of training iterations/generations to run (default: 50)",
     )
     rl_train_parser.add_argument(
         "--rollout-steps",
         type=int,
-        default=256,
-        help="number of rollout steps to collect per generation (default: 256)",
+        default=4096,
+        help="number of rollout steps to collect per generation (default: 4096)",
     )
     rl_train_parser.add_argument(
         "--batch-size",
         type=int,
-        default=64,
-        help="PPO mini-batch size (default: 64)",
+        default=512,
+        help="PPO mini-batch size (default: 512)",
+    )
+    rl_train_parser.add_argument(
+        "--epochs",
+        type=int,
+        default=4,
+        help="PPO epochs per batch (default: 4)",
+    )
+    rl_train_parser.add_argument(
+        "--lr",
+        type=float,
+        default=2.5e-4,
+        help="initial learning rate (default: 2.5e-4)",
     )
     rl_train_parser.add_argument(
         "--eval-every",
         type=int,
-        default=2,
-        help="evaluate against league every N generations (default: 2)",
+        default=25,
+        help="evaluate against deterministic benchmark bots every N generations (default: 25)",
     )
     rl_train_parser.add_argument(
-        "--checkpoint-dir",
-        type=str,
-        default="D:/tft-winner-data/set18/models",
-        help="directory to persist model weights, checkpoints, and league profiles (default: D:/tft-winner-data/set18/models)",
+        "--snapshot-every",
+        type=int,
+        default=50,
+        help="archive frozen historical snapshot every N generations (default: 50)",
     )
     rl_train_parser.add_argument(
-        "--run-name",
+        "--trunk-checkpoint",
         type=str,
-        default="ppo_tri_tier_league_v1",
-        help="custom experiment run name for WandB tracking and grouping (default: ppo_tri_tier_league_v1)",
+        default="D:/tft-winner-data/set18/models/trunk/best_model.pt",
+        help="path to pre-trained frozen MultiModalFusionTrunk checkpoint",
+    )
+    rl_train_parser.add_argument(
+        "--world-model-checkpoint",
+        type=str,
+        default="D:/tft-winner-data/set18/models/transition/best_model.pt",
+        help="path to pre-trained StateTransitionPredictor (World Model) checkpoint",
+    )
+    rl_train_parser.add_argument(
+        "--z-index-path",
+        type=str,
+        default="models/clustering/z_index.pt",
+        help="path to exported Z-Index centroids artifact (z_index.pt)",
     )
     rl_train_parser.add_argument(
         "--round-winner-model",
         type=str,
-        default="D:/tft-winner-data/set18/models/round_winner_model.joblib",
-        help="path to trained single round winner ML model (default: D:/tft-winner-data/set18/models/round_winner_model.joblib)",
+        default=None,
+        help="path to optional custom combat model checkpoint (.pt for Deep Learning GPU, or .joblib for LightGBM CPU). Defaults to fast GPU Deep Learning resolver.",
     )
     rl_train_parser.add_argument(
-        "--archetype",
+        "--checkpoint-dir",
         type=str,
-        default="generalist",
-        choices=["generalist", "aggro_tempo", "hyper_roll", "fast8_flex"],
-        help="strategic gameplay archetype for agent reward modulation (default: generalist)",
+        default="checkpoints/league",
+        help="directory to persist model weights, checkpoints, and league profiles (default: checkpoints/league)",
     )
     rl_train_parser.add_argument(
-        "--resume",
-        action="store_true",
-        help="resume training and WandB logging from existing checkpoint in checkpoint-dir with locked hyperparameters",
+        "--run-name",
+        type=str,
+        default="ppo_alphastar_v1",
+        help="custom experiment run name for WandB tracking and grouping (default: ppo_alphastar_v1)",
     )
     rl_train_parser.add_argument(
         "--device",
@@ -319,6 +343,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-wandb",
         action="store_true",
         help="disable WandB cloud logging and run in pure offline mode",
+    )
+    rl_train_parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="automatically resume training from the latest generation checkpoint in --checkpoint-dir",
+    )
+    rl_train_parser.add_argument(
+        "--resume-from",
+        type=str,
+        default=None,
+        help="path to specific checkpoint directory to resume from (e.g. checkpoints/league/gen_0032)",
     )
 
     rl_league_parser = subcommands.add_parser(
@@ -1064,148 +1099,52 @@ def _run_simulation(args: argparse.Namespace) -> int:
 
 
 def _run_rl_train(args: argparse.Namespace) -> int:
-    """Execute RL Maskable PPO training loop with League evaluation, TensorBoard tracking, and GPU support."""
-    import subprocess
-    import sys
-    import webbrowser
+    """Execute RL Maskable PPO training loop with AlphaStar League, WandB tracking, and health telemetry."""
     import torch
-    from tft_ai_player.rl.evaluation.report import print_league_terminal_summary
     from tft_ai_player.rl.train import LeagueTrainer
     from tft_ai_player.simulation.sets.set18 import get_set18_data
 
-    def _resolve_dir(p_str: str, default_sub: str) -> Path:
-        if p_str:
-            p = Path(p_str)
-            if str(p).upper().startswith("D:") and not Path("D:/").exists():
-                return Path(__file__).resolve().parents[2] / default_sub / "set18"
-            return p
-        if Path("D:/").exists():
-            return Path("D:/tft-winner-data/set18") / default_sub
-        return Path(__file__).resolve().parents[2] / default_sub / "set18"
-
-    def _resolve_file(p_str: str) -> str | None:
-        if p_str:
-            p = Path(p_str)
-            if str(p).upper().startswith("D:") and not Path("D:/").exists():
-                fallback = Path(__file__).resolve().parents[2] / "models" / "set18" / p.name
-                return str(fallback)
-            return str(p)
-        return None
-
     device_name = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    checkpoint_dir = _resolve_dir(args.checkpoint_dir, "models")
-    rw_model_path = _resolve_file(args.round_winner_model)
+    use_wandb = not getattr(args, "no_wandb", False)
 
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-
-    print("\n" + "=" * 70)
-    print(" [TFT RL TRAINING] Maskable PPO + GRU Memory + Multi-Head Self-Attention")
+    print("\n" + "=" * 75)
+    print(" [TFT RL TRAINING] PPO & AlphaStar League Pipeline (|A|=111, Obs=704D)")
     print(f"  Target Set: Set 18 | Device: {device_name.upper()}")
     if torch.cuda.is_available():
         gpu_name = torch.cuda.get_device_name(0)
         vram_total = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         print(f"  GPU Hardware: {gpu_name} ({vram_total:.1f} GB VRAM)")
     print(f"  Generations: {args.generations} | Rollout Steps: {args.rollout_steps} | Batch Size: {args.batch_size}")
-    print(f"  Models & Checkpoint Storage: {checkpoint_dir}")
-    print(f"  Round Winner ML Model: {rw_model_path}")
-    print("=" * 70)
-
-    # 1. Initialize League Trainer
-    from tft_ai_player.rl.types import AgentArchetype
-    archetype_val = AgentArchetype(getattr(args, "archetype", "generalist"))
-    use_wandb = not getattr(args, "no_wandb", False)
+    print(f"  Trunk Checkpoint: {args.trunk_checkpoint}")
+    combat_desc = f"LightGBM ({args.round_winner_model})" if args.round_winner_model else "Deep Learning (GPU Neural Trunk combat_head)"
+    print(f"  Combat Engine: {combat_desc}")
+    print("=" * 75 + "\n")
 
     trainer = LeagueTrainer(
         set_data=get_set18_data(),
-        archetype=archetype_val,
-        buffer_size=args.rollout_steps + 64,
+        trunk_checkpoint=args.trunk_checkpoint,
+        world_model_checkpoint=args.world_model_checkpoint,
+        z_index_path=args.z_index_path,
+        round_winner_model_path=args.round_winner_model,
+        lr=args.lr,
+        total_rollout_steps=args.rollout_steps,
         batch_size=args.batch_size,
+        num_epochs=args.epochs,
+        max_generations=args.generations,
+        eval_interval=args.eval_every,
+        snapshot_interval=args.snapshot_every,
         device=device_name,
-        checkpoint_dir=checkpoint_dir,
+        checkpoint_dir=args.checkpoint_dir,
         run_name=args.run_name,
-        round_winner_model_path=rw_model_path,
         use_wandb=use_wandb,
         wandb_project=getattr(args, "wandb_project", "tft-ai-league"),
         wandb_entity=getattr(args, "wandb_entity", None),
         wandb_group=getattr(args, "wandb_group", None) or args.run_name,
+        resume=getattr(args, "resume", False),
+        resume_from=getattr(args, "resume_from", None),
     )
-    print(f"  Strategic Archetype: {archetype_val.value.upper()} | Run Name: {trainer.run_name}")
-    print("=" * 70)
 
-    # 2. Resume if requested (locks hyperparameters from existing checkpoint)
-    start_gen = 1
-    if args.resume:
-        resumed_gen = trainer.load_checkpoint()
-        if resumed_gen > 0:
-            start_gen = resumed_gen + 1
-            print(f" [!] Resumed Tri-Tier run '{trainer.run_name}' from Generation {resumed_gen} with locked hyperparameters!")
-        else:
-            print(" [!] No previous checkpoint found in checkpoint-dir. Starting fresh run from Generation 1.")
-
-    end_gen = start_gen + args.generations - 1
-
-    # 3. Training loop
-    try:
-        for gen in range(start_gen, end_gen + 1):
-            metrics = trainer.train_iteration(
-                generation=gen,
-                rollout_steps=args.rollout_steps,
-                eval_every=args.eval_every,
-            )
-
-            # Display Tri-Tier Multi-Agent Overview
-            tri = metrics.get("tri_tier", {})
-            if tri and len(tri) >= 3:
-                print(f" [Gen {gen:03d}/{end_gen:03d}] Multi-Agent League Overview:", flush=True)
-                for aid, label in [
-                    ("Main_Agent", "Main Agent (Generalist)      "),
-                    ("Main_Exploiter", "Main Exploiter (Hyper-Roll)  "),
-                    ("League_Exploiter", "League Exploiter (Fast-8/9) "),
-                ]:
-                    if aid in tri:
-                        ad = tri[aid]
-                        elo_v = ad.get("elo", 1200.0)
-                        rew_v = ad.get("mean_reward", 0.0)
-                        loss_v = ad.get("loss", 0.0)
-                        act = ad.get("action_distribution", {})
-                        act_str = (
-                            f"Pass: {act.get('Pass', 0)*100:4.1f}% | Buy: {act.get('Buy', 0)*100:4.1f}% | "
-                            f"Roll: {act.get('Reroll', 0)*100:4.1f}% | EXP: {act.get('EXP', 0)*100:4.1f}% | "
-                            f"Deploy: {act.get('Deploy', 0)*100:4.1f}%"
-                        ) if act else ""
-                        print(f"   |--> [{label}] Rew: {rew_v:+.4f} | Elo: {elo_v:6.1f} | Loss: {loss_v:.4f} | {act_str}", flush=True)
-            else:
-                econ = metrics.get("block_economy", 0.0)
-                board = metrics.get("block_board_power", metrics.get("block_board_building", 0.0))
-                combat = metrics.get("block_combat_outcome", metrics.get("block_combat", 0.0))
-                kl = metrics.get("approx_kl", 0.0)
-                ev = metrics.get("explained_variance", 0.0)
-                print(
-                    f" [Gen {gen:03d}/{end_gen:03d}] Rew: {metrics['mean_reward']:+.4f} (Econ: {econ:+.3f}, Board: {board:+.3f}, Cbt: {combat:+.3f}) | Loss: {metrics['loss']:.4f} | Pol: {metrics['policy_loss']:.4f} | Ent: {metrics['entropy']:.3f} | KL: {kl:.4f} | EV: {ev:+.2f}",
-                    flush=True,
-                )
-
-            # Display Turn Efficiency for Main Agent
-            if "actions_per_round" in metrics:
-                apm = metrics["actions_per_round"]
-                clean_econ = metrics.get("pass_clean_econ_rate", 0.0) * 100.0
-                missed_items = metrics.get("pass_missed_craft_rate", 0.0) * 100.0
-                missed_upg = metrics.get("pass_missed_upgrade_rate", 0.0) * 100.0
-                print(
-                    f"   |--> Turn Efficiency: APM (Non-Pass/Rnd): {apm:.2f} | Clean Econ Passes: {clean_econ:.1f}% | Missed Crafts: {missed_items:.1f}% | Missed Upgrades: {missed_upg:.1f}%",
-                    flush=True,
-                )
-
-            if "eval_avg_placement" in metrics:
-                print(
-                    f"   |--> Benchmark Placement: {metrics['eval_avg_placement']:.2f} | Top 4: {metrics['eval_top4_rate']*100:.1f}% | Win: {metrics['eval_win_rate']*100:.1f}% | League Elo: {metrics['league_elo']:.1f}",
-                    flush=True,
-                )
-    finally:
-        trainer.wandb_logger.close()
-
-    print("\n[+] Training completed successfully!")
-    print_league_terminal_summary(trainer.league)
+    trainer.run_training_loop()
     return 0
 
 
@@ -1222,14 +1161,12 @@ def _run_rl_league(args: argparse.Namespace) -> int:
     league = LeagueManager(checkpoint_dir=args.checkpoint_dir)
     evaluator = TournamentEvaluator(league)
 
-    # Base registered agent IDs to populate lobbies
     agent_pool = list(league.profiles.keys())
     if len(agent_pool) < 8:
         agent_pool = (agent_pool * 8)[:8]
 
     for match_idx in range(1, args.matches + 1):
         seed = 1000 + match_idx
-        # Sample seats
         seats = [str(s) for s in random.choices(agent_pool, k=8)]
         result = evaluator.run_match(agent_seats=seats, seed=seed)
         podium = [f"#{rank} {aid}" for aid, rank in sorted(result.placements.items(), key=lambda x: x[1])[:3]]
