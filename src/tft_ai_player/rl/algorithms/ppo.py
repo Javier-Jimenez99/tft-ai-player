@@ -89,11 +89,10 @@ class RolloutBuffer:
         valid_len = self.ptr
 
         for step in reversed(range(valid_len)):
+            next_non_terminal = 1.0 - self.dones[step].float()
             if step == valid_len - 1:
-                next_non_terminal = 1.0 - last_done.float()
                 next_values = last_val
             else:
-                next_non_terminal = 1.0 - self.dones[step + 1].float()
                 next_values = self.values[step + 1]
 
             delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - self.values[step]
@@ -250,6 +249,15 @@ class MaskablePPO:
                 num_updates += 1
 
         n = max(1, num_updates)
+        # Compute post-update explained variance to measure value network convergence
+        with torch.no_grad():
+            v_post = self.model.get_value(buffer.observations[:valid_len]).squeeze(-1).cpu().numpy()
+        var_y = float(np.var(y_true))
+        if var_y > 1e-8:
+            explained_var = float(1.0 - (np.var(y_true - v_post) / var_y))
+        else:
+            explained_var = 0.0
+
         return {
             "policy_loss": total_policy_loss / n,
             "value_loss": total_value_loss / n,

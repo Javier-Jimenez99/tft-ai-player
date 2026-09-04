@@ -159,16 +159,17 @@ class ShopBeamSearchPlanner:
         Returns:
             list[int]: Sequence of discrete action IDs (e.g. [BUY_SHOP_0, DEPLOY_UNIT_15, ...])
         """
-        # Ensure target ŝ_{t+1} is projected if world_model is available
-        if s_hat_next is None and self.world_model is not None and self.encoder is not None:
-            with torch.no_grad():
-                _, s_t, _ = self.encoder.extract_state_vector(
-                    player=player,
-                    stage=stage,
-                    round_in_stage=round_in_stage,
-                    target_z=target_z,
-                )
-                s_hat_next = self.world_model(s_t.unsqueeze(0)).squeeze(0)
+        # Optional neural evaluation projection
+        if getattr(self, "use_neural_eval", False):
+            if s_hat_next is None and self.world_model is not None and self.encoder is not None:
+                with torch.no_grad():
+                    _, s_t, _ = self.encoder.extract_state_vector(
+                        player=player,
+                        stage=stage,
+                        round_in_stage=round_in_stage,
+                        target_z=target_z,
+                    )
+                    s_hat_next = self.world_model(s_t.unsqueeze(0)).squeeze(0)
 
         # Baseline root state (taking 0 actions)
         root_node = PlannerNode(
@@ -177,14 +178,15 @@ class ShopBeamSearchPlanner:
             actions=[],
             heuristic_score=self.compute_fast_heuristic(player),
         )
-        root_score = self.evaluate_neural_score(
-            player=player,
-            stage=stage,
-            round_in_stage=round_in_stage,
-            target_z=target_z,
-            s_hat_next=s_hat_next,
-        )
-        root_node.neural_score = root_score
+        if getattr(self, "use_neural_eval", False):
+            root_score = self.evaluate_neural_score(
+                player=player,
+                stage=stage,
+                round_in_stage=round_in_stage,
+                target_z=target_z,
+                s_hat_next=s_hat_next,
+            )
+            root_node.neural_score = root_score
 
         # Identify purchasable slots
         available_slots = [i for i, card in enumerate(player.shop.slots) if card is not None]

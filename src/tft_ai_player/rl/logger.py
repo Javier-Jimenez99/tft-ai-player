@@ -34,9 +34,10 @@ def check_collapse_warnings(metrics: dict[str, Any]) -> list[str]:
                 f"Entropy Anomaly (entropy={entropy:.3f} > 4.0): Policy failing to converge."
             )
 
-    # 2. Explained Variance
+    # 2. Explained Variance (checked after initial warm-up generations if generation is provided)
     exp_var = metrics.get("explained_variance")
-    if exp_var is not None and exp_var < 0.0:
+    gen = metrics.get("generation")
+    if exp_var is not None and exp_var < 0.0 and (gen is None or gen > 3):
         warnings.append(
             f"Critic Failure (explained_variance={exp_var:.3f} < 0.0): Value network corrupted."
         )

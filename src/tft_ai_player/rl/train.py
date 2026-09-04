@@ -362,6 +362,7 @@ class LeagueTrainer:
         macro_sims: list[float] = []
         cluster_matches: list[float] = []
         planned_queue: list[int] = []
+        need_shop_plan = True
         guided_actions_count = 0
         total_planning_actions = 0
         planner_agreements = 0
@@ -370,8 +371,8 @@ class LeagueTrainer:
             focal_player = env.game.get_focal_player()
             rinfo = env.game.stage_manager.get_current_round_info()
 
-            # Plan lookahead actions for current visible shop if queue is empty
-            if not planned_queue and focal_player.alive:
+            # Plan lookahead actions for current visible shop at round start or after reroll
+            if need_shop_plan and focal_player.alive:
                 planned_queue = self.planner.plan_shop_sequence(
                     player=focal_player,
                     pool=env.game.pool,
@@ -379,6 +380,7 @@ class LeagueTrainer:
                     round_in_stage=rinfo.round_in_stage,
                     target_z=env.target_z,
                 )
+                need_shop_plan = False
 
             obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
             mask_t = torch.as_tensor(mask, dtype=torch.bool, device=self.device).unsqueeze(0)
@@ -419,9 +421,10 @@ class LeagueTrainer:
             next_mask = next_info["action_mask"]
             done = terminated or truncated
 
-            # If reroll (action 6), clear planned_queue to re-plan the newly rolled shop
-            if action == 6:
+            # If reroll (action 6), round pass (action 0), or game over, trigger shop re-plan
+            if action == 6 or action == 0 or done:
                 planned_queue.clear()
+                need_shop_plan = True
 
             active_buffer.add(
                 obs=obs,
