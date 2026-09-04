@@ -385,6 +385,83 @@ def _candidate(game_id: str) -> TrackedTimelineCandidate:
     )
 
 
+def test_download_games_prepicks_and_balances_tiers(tmp_path: Path, monkeypatch) -> None:
+    from tft_ai_player.dataset import PlayerGraph
+
+    # Create manifest with multiple tiers and players
+    graph = PlayerGraph()
+    manifest_dir = tmp_path / "graph"
+    graph.add_player(riot_id="Gold1#NA1", region="na1", game_name="Gold1", tag_line="NA1", tier="GOLD")
+    graph.add_player(riot_id="Gold2#NA1", region="na1", game_name="Gold2", tag_line="NA1", tier="GOLD")
+    graph.add_player(riot_id="Silver1#NA1", region="na1", game_name="Silver1", tag_line="NA1", tier="SILVER")
+
+    for i in range(5):
+        graph.add_game(match_uuid=f"gold1-game-{i}", timeline_url=f"https://matches.metatft.com/g1-{i}.json", focal_player_riot_id="Gold1#NA1", tier="GOLD", tft_set="TFTSet18")
+    for i in range(5):
+        graph.add_game(match_uuid=f"gold2-game-{i}", timeline_url=f"https://matches.metatft.com/g2-{i}.json", focal_player_riot_id="Gold2#NA1", tier="GOLD", tft_set="TFTSet18")
+    for i in range(3):
+        graph.add_game(match_uuid=f"silver-game-{i}", timeline_url=f"https://matches.metatft.com/s1-{i}.json", focal_player_riot_id="Silver1#NA1", tier="SILVER", tft_set="TFTSet18")
+
+    graph.save_csv(manifest_dir)
+
+    downloaded_urls: list[str] = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def fetch_timeline(self, url: str) -> dict[str, object]:
+            downloaded_urls.append(url)
+            return _timeline()
+
+    monkeypatch.setattr(cli, "MetaTftClient", FakeClient)
+
+    out_dir = tmp_path / "data"
+    args = Namespace(
+        manifest_dir=manifest_dir,
+        output_dir=out_dir,
+        target_tiers=None,
+        max_games_per_tier=2,
+        max_total_games=None,
+        tier_partitioned=False,
+        tft_set="TFTSet18",
+        request_interval=0.0,
+        seed=42,
+    )
+
+    ret = cli._run_download_games(args)
+    assert ret == 0
+    # Gold had 10 games, capped at 2. Silver had 3 games, capped at 2. Total should be 4 downloaded
+    assert len(downloaded_urls) == 4
+    # Ensure both players in Gold contributed fairly or both tiers were represented
+    assert any("s1-" in url for url in downloaded_urls)
+    assert any("g1-" in url or "g2-" in url for url in downloaded_urls)
+
+
+def test_plot_graph_generates_html_and_png(tmp_path: Path) -> None:
+    from tft_ai_player.dataset import PlayerGraph
+
+    graph = PlayerGraph()
+    manifest_dir = tmp_path / "graph"
+    graph.add_player(riot_id="P1#NA1", region="na1", game_name="P1", tag_line="NA1", tier="CHALLENGER", is_app_user=True, app_matches=5)
+    graph.add_player(riot_id="P2#NA1", region="na1", game_name="P2", tag_line="NA1", tier="DIAMOND")
+    graph.add_edge("P1#NA1", "P2#NA1", "match-1")
+    graph.add_game(match_uuid="match-1", timeline_url="https://url/1.json", focal_player_riot_id="P1#NA1", tier="CHALLENGER")
+    graph.save_csv(manifest_dir)
+
+    out_dir = tmp_path / "viz"
+    args = Namespace(
+        manifest_dir=manifest_dir,
+        output_dir=out_dir,
+        format="all",
+    )
+
+    ret = cli._run_plot_graph(args)
+    assert ret == 0
+    assert (out_dir / "player_network.html").exists()
+    assert (out_dir / "player_network_dashboard.png").exists()
+
+
 def _timeline() -> dict[str, object]:
     return {
         "summoner_name": "Focal",

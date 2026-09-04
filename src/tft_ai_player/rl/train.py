@@ -159,6 +159,7 @@ class LeagueTrainer:
                 siamese_paths = [
                     rw_path if rw_path and "siamese" in str(rw_path).lower() else None,
                     Path("models/round_winner/deep_siamese_combat_best.pt"),
+                    Path("D:/tft-winner-data/set18/models/round_winner/deep_siamese_combat_best.pt"),
                     Path("D:/tft-winner-data/set18/models/deep_siamese_combat_best.pt"),
                 ]
                 siamese_ckpt = next((p for p in siamese_paths if p and Path(p).exists()), None)

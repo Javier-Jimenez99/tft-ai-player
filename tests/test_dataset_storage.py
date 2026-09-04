@@ -114,7 +114,69 @@ def test_write_game_compatibility_alias(tmp_path) -> None:
     assert "unknown_Focal.csv" in path.name
 
 
-def _observation(stage: str, match_id: str = "game-uuid") -> RoundObservation:
+def test_writer_tier_partitioned_storage(tmp_path) -> None:
+    writer = PlayerCsvWriter(tmp_path, tier_partitioned=True)
+    obs_gold = [_observation(stage="2-1", match_id="gold-match-1", focal_tier="GOLD II 50 LP")]
+    obs_challenger = [_observation(stage="2-1", match_id="chal-match-1", focal_tier="CHALLENGER I 995 LP")]
+
+    path_gold = writer.write_player_game(
+        obs_gold,
+        collected_from_riot_id="GoldPlayer#NA1",
+        collected_from_region="na1",
+        match_id_ow="gold-ow-1",
+    )
+    path_chal = writer.write_player_game(
+        obs_challenger,
+        collected_from_riot_id="ChallengerPlayer#NA1",
+        collected_from_region="na1",
+        match_id_ow="chal-ow-1",
+    )
+
+    assert path_gold == tmp_path / "tiers" / "gold" / "players" / "na1_GoldPlayer_NA1.csv"
+    assert path_chal == tmp_path / "tiers" / "challenger" / "players" / "na1_ChallengerPlayer_NA1.csv"
+
+    # Verify existing match IDs across tier directories
+    all_ids = writer.all_existing_match_ids()
+    assert "gold-match-1" in all_ids
+    assert "chal-match-1" in all_ids
+
+    with path_gold.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+        assert len(rows) == 1
+        assert rows[0]["tier_category"] == "GOLD"
+
+
+def test_normalize_tier() -> None:
+    from tft_ai_player.dataset.models import normalize_tier
+    assert normalize_tier("CHALLENGER I 995 LP") == "CHALLENGER"
+    assert normalize_tier("Grandmaster I 400 LP") == "GRANDMASTER"
+    assert normalize_tier("Master I 0 LP") == "MASTER"
+    assert normalize_tier("Diamond IV 20 LP") == "DIAMOND"
+    assert normalize_tier("Emerald II 55 LP") == "EMERALD"
+    assert normalize_tier("Platinum I 90 LP") == "PLATINUM"
+    assert normalize_tier("Gold III 10 LP") == "GOLD"
+    assert normalize_tier("Silver IV 0 LP") == "SILVER"
+    assert normalize_tier("Bronze I 75 LP") == "BRONZE"
+    assert normalize_tier("Iron II 20 LP") == "IRON"
+    assert normalize_tier("Unranked") == "UNKNOWN"
+    assert normalize_tier(None) == "UNKNOWN"
+    assert normalize_tier("") == "UNKNOWN"
+
+
+def test_existing_match_ids_by_tier(tmp_path) -> None:
+    writer = PlayerCsvWriter(tmp_path, tier_partitioned=True)
+    obs_silver = [_observation(stage="2-1", match_id="match-silv-1", focal_tier="SILVER II 50 LP")]
+    obs_bronze = [_observation(stage="2-1", match_id="match-bronze-1", focal_tier="BRONZE I 10 LP")]
+    writer.write_player_game(obs_silver, collected_from_riot_id="P1#EUW", collected_from_region="euw1", tier="SILVER")
+    writer.write_player_game(obs_bronze, collected_from_riot_id="P2#EUW", collected_from_region="euw1", tier="BRONZE")
+
+    by_tier = writer.existing_match_ids_by_tier()
+    assert by_tier.get("SILVER") == {"match-silv-1"}
+    assert by_tier.get("BRONZE") == {"match-bronze-1"}
+    assert writer.all_existing_match_ids() == {"match-silv-1", "match-bronze-1"}
+
+
+def _observation(stage: str, match_id: str = "game-uuid", focal_tier: str = "CHALLENGER I 1756 LP") -> RoundObservation:
     return RoundObservation(
         match_id=match_id,
         game_datetime="2026-08-23T12:07:19Z",
@@ -126,7 +188,7 @@ def _observation(stage: str, match_id: str = "game-uuid") -> RoundObservation:
         timeline_schema_version="1.0",
         portal="TFT_Portals_Champions_ChampionStart",
         focal_player="Focal",
-        focal_tier="CHALLENGER I 1756 LP",
+        focal_tier=focal_tier,
         focal_rating_numeric=4556,
         avg_match_rating="GRANDMASTER I 937 LP",
         avg_match_rating_numeric=3737,

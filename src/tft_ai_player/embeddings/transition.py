@@ -342,10 +342,12 @@ class TransitionTrajectoryDataset(Dataset):
         item_vocab: ItemVocabulary | None = None,
         trait_vocab: TraitVocabulary | None = None,
         max_samples: int | None = None,
+        allowed_tiers: Sequence[str] | None = ("CHALLENGER",),
     ) -> None:
         self.vocab = vocab or ChampionVocabulary()
         self.item_vocab = item_vocab or ItemVocabulary()
         self.trait_vocab = trait_vocab or TraitVocabulary()
+        self.allowed_tiers = allowed_tiers
         self.pairs: list[dict[str, Any]] = []
         self.match_ids: list[str] = []
 
@@ -369,6 +371,8 @@ class TransitionTrajectoryDataset(Dataset):
             csv_files = list(path.glob("*.csv"))
             if not csv_files and (path / "players").exists():
                 csv_files = list((path / "players").glob("*.csv"))
+            if not csv_files and (path / "tiers").exists():
+                csv_files = list((path / "tiers").rglob("*.csv"))
             if not csv_files:
                 csv_files = list(path.rglob("*.csv"))
         else:
@@ -394,12 +398,31 @@ class TransitionTrajectoryDataset(Dataset):
 
     def _load_from_records(self, records: Sequence[Mapping[str, Any]]) -> None:
         trajectories: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        target_tiers = (
+            {t.strip().upper() for t in self.allowed_tiers if t.strip()}
+            if self.allowed_tiers is not None
+            else None
+        )
 
         for r in records:
             match_id = str(r.get("match_id", "")).strip()
             focal_player = str(r.get("focal_player", "")).strip()
             if not match_id or not focal_player:
                 continue
+
+            if target_tiers:
+                tier_cat = str(r.get("tier_category", "")).strip().upper()
+                focal_tier = str(r.get("focal_tier", "")).strip().upper()
+                avg_rating = str(r.get("avg_match_rating", "")).strip().upper()
+                has_tier_info = bool(tier_cat or focal_tier or avg_rating)
+                if has_tier_info:
+                    matches = (
+                        tier_cat in target_tiers
+                        or any(t in focal_tier for t in target_tiers)
+                        or any(t in avg_rating for t in target_tiers)
+                    )
+                    if not matches:
+                        continue
 
             stage_str = str(r.get("round_stage", "")).strip()
             stage_tuple = parse_stage_string(stage_str)

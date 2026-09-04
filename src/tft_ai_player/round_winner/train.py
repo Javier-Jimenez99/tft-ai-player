@@ -24,7 +24,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path(r"D:\tft-winner-data\set18\models") if Path(r"D:\tft-winner-data\set18\models").exists() else Path("models/round_winner"),
+        default=Path(r"D:\tft-winner-data\set18\models\round_winner") if Path(r"D:\tft-winner-data\set18\models").exists() else Path("models/round_winner"),
         help="Directory where model bundle and metadata will be saved.",
     )
     parser.add_argument(
@@ -63,6 +63,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=None,
         help="Optional custom filename for saved metadata (e.g. metadata_ensemble.json).",
     )
+    parser.add_argument(
+        "--allowed-tiers",
+        nargs="+",
+        default=["CHALLENGER"],
+        help="Allowed tiers for training dataset (default: CHALLENGER). Pass ALL to use all data.",
+    )
     args = parser.parse_args(argv)
 
     data_dir = args.data_dir
@@ -85,48 +91,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     trainer = RoundWinnerTrainer(random_state=args.random_state)
     
-    # Load dataset
-    path = Path(data_dir)
-    csv_files = list(path.glob("*.csv"))
-    if not csv_files and (path / "players").exists():
-        path = path / "players"
-        csv_files = list(path.glob("*.csv"))
-    if not csv_files:
-        csv_files = list(path.rglob("*.csv"))
-
-    if not csv_files:
-        print(f"Error: No CSV files found in '{data_dir}' or subdirectories.", file=sys.stderr)
-        return 1
-
-    if args.max_files:
-        csv_files = csv_files[:args.max_files]
-        print(f"Subsampled {len(csv_files)} CSV files for fast execution.")
-    else:
-        print(f"Found {len(csv_files)} CSV files to process.")
-    
-    df_list = []
-    for file_path in csv_files:
-        try:
-            df_list.append(pd.read_csv(file_path, encoding="utf-8"))
-        except Exception:
-            df_list.append(pd.read_csv(file_path, encoding="latin-1"))
-
-    df_raw = pd.concat(df_list, ignore_index=True)
-    df_clean = df_raw.dropna(subset=["label"]).copy()
-    df_clean["label"] = df_clean["label"].astype(int)
-    df_clean = df_clean.drop_duplicates(subset=["match_id", "round_stage", "focal_player"]).reset_index(drop=True)
-
-    # Compute ground truth damage loss
-    if "focal_health" in df_clean.columns:
-        df_clean["hp_loss"] = df_clean.groupby(["match_id", "focal_player"])["focal_health"].diff(-1)
-        stage_nums = df_clean["round_stage"].astype(str).str[0]
-        stage_baseline = stage_nums.map({
-            "1": 2, "2": 5, "3": 10, "4": 12, "5": 15, "6": 18, "7": 21
-        }).fillna(10).astype(float)
-        valid_mask = (df_clean["label"] == 0) & (df_clean["hp_loss"] >= 1.0) & (df_clean["hp_loss"] <= 45.0)
-        df_clean["damage_loss"] = np.where(valid_mask, df_clean["hp_loss"], stage_baseline)
-    else:
-        df_clean["damage_loss"] = 10.0
+    # Load dataset with tier isolation
+    allowed_tiers = None if "ALL" in [t.upper() for t in args.allowed_tiers] else args.allowed_tiers
+    df_clean = trainer.load_dataset(data_dir, allowed_tiers=allowed_tiers)
 
     print(f"Loaded {len(df_clean):,} clean round observations across {df_clean['match_id'].nunique():,} unique matches.")
 

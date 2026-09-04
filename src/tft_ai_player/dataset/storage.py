@@ -13,19 +13,36 @@ from .models import RoundObservation
 class PlayerCsvWriter:
     """Append PVP observations for each player to one CSV file."""
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(self, root: str | Path, *, tier_partitioned: bool = False) -> None:
         self.root = Path(root)
+        self.tier_partitioned = tier_partitioned
 
-    def player_csv_path(self, *, region: str, riot_id: str) -> Path:
+    def player_csv_path(
+        self,
+        *,
+        region: str,
+        riot_id: str,
+        tier: str | None = None,
+    ) -> Path:
         """Return the destination path for a given player's CSV."""
 
         slug = _safe_player_slug(region, riot_id)
+        if self.tier_partitioned:
+            effective_tier = tier or "unknown"
+            tier_slug = _safe_segment(effective_tier.lower())
+            return self.root / "tiers" / tier_slug / "players" / f"{slug}.csv"
         return self.root / "players" / f"{slug}.csv"
 
-    def existing_match_ids(self, *, region: str, riot_id: str) -> set[str]:
+    def existing_match_ids(
+        self,
+        *,
+        region: str,
+        riot_id: str,
+        tier: str | None = None,
+    ) -> set[str]:
         """Return set of match IDs already present in this player's CSV file."""
 
-        path = self.player_csv_path(region=region, riot_id=riot_id)
+        path = self.player_csv_path(region=region, riot_id=riot_id, tier=tier)
         if not path.exists():
             return set()
         match_ids: set[str] = set()
@@ -144,23 +161,54 @@ class PlayerCsvWriter:
         return riot_id.strip() in self.load_player_blacklist()
 
     def all_existing_match_ids(self) -> set[str]:
-        """Return set of all match IDs across all player CSV files in data/players/."""
+        """Return set of all match IDs across all player CSV files in storage."""
 
+        all_by_tier = self.existing_match_ids_by_tier()
+        merged: set[str] = set()
+        for ids in all_by_tier.values():
+            merged.update(ids)
+        return merged
+
+    def existing_match_ids_by_tier(self) -> dict[str, set[str]]:
+        """Return dict mapping tier name -> set of unique match IDs across player CSV files."""
+        from collections import defaultdict
+        from .models import normalize_tier
+
+        tier_matches: dict[str, set[str]] = defaultdict(set)
+        candidate_paths: list[Path] = []
         players_dir = self.root / "players"
-        if not players_dir.exists():
-            return set()
-        match_ids: set[str] = set()
-        for path in players_dir.glob("*.csv"):
+        if players_dir.exists():
+            candidate_paths.extend(players_dir.glob("*.csv"))
+        tiers_dir = self.root / "tiers"
+        if tiers_dir.exists():
+            candidate_paths.extend(tiers_dir.rglob("*.csv"))
+        if not candidate_paths and self.root.exists():
+            candidate_paths.extend(self.root.rglob("*.csv"))
+
+        for path in candidate_paths:
+            path_tier = (
+                path.parent.parent.name.upper()
+                if path.parent.name == "players" and path.parent.parent.parent.name == "tiers"
+                else "UNKNOWN"
+            )
             try:
-                with path.open(newline="", encoding="utf-8") as file:
+                with path.open(newline="", encoding="utf-8", errors="ignore") as file:
                     reader = csv.DictReader(file)
                     for row in reader:
                         match_id = row.get("match_id")
-                        if match_id:
-                            match_ids.add(match_id)
+                        if not match_id:
+                            continue
+                        row_tier = (
+                            row.get("tier_category")
+                            or row.get("focal_tier")
+                            or row.get("avg_match_rating")
+                            or path_tier
+                        )
+                        norm = normalize_tier(row_tier)
+                        tier_matches[norm].add(match_id)
             except Exception:
                 continue
-        return match_ids
+        return dict(tier_matches)
 
     def write_player_game(
         self,
@@ -169,15 +217,23 @@ class PlayerCsvWriter:
         collected_from_riot_id: str,
         collected_from_region: str,
         match_id_ow: str | None = None,
+        tier: str | None = None,
     ) -> Path | None:
         """Append all valid rounds from one game to the player's CSV file."""
 
         if not observations:
             return None
 
+        from .models import normalize_tier
+        effective_tier = (
+            tier
+            or (observations[0].tier_category if observations and observations[0].tier_category else None)
+            or (normalize_tier(observations[0].focal_tier or observations[0].avg_match_rating) if observations else None)
+        )
         path = self.player_csv_path(
             region=collected_from_region,
             riot_id=collected_from_riot_id,
+            tier=effective_tier,
         )
         path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -208,6 +264,7 @@ class PlayerCsvWriter:
         collected_from_riot_id: str | None = None,
         collected_from_region: str | None = None,
         match_id_ow: str | None = None,
+        tier: str | None = None,
     ) -> Path | None:
         if not observations:
             return None
@@ -216,6 +273,7 @@ class PlayerCsvWriter:
             collected_from_riot_id=collected_from_riot_id or observations[0].focal_player,
             collected_from_region=collected_from_region or "unknown",
             match_id_ow=match_id_ow,
+            tier=tier,
         )
 
 

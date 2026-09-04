@@ -248,8 +248,8 @@ def train_deep_siamese_combat(
     }, save_file)
     print(f" [+] Saved model checkpoint to {save_file}")
 
-    # Also save copy to D:/tft-winner-data/set18/models if directory exists
-    backup_dir = Path("D:/tft-winner-data/set18/models")
+    # Also save copy to D:/tft-winner-data/set18/models/round_winner if directory exists
+    backup_dir = Path("D:/tft-winner-data/set18/models/round_winner")
     if backup_dir.exists():
         backup_file = backup_dir / "deep_siamese_combat_best.pt"
         torch.save(torch.load(save_file, weights_only=False), backup_file)

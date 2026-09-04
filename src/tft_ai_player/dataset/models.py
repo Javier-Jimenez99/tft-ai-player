@@ -9,6 +9,34 @@ from typing import Any, Literal
 
 RoundOutcome = Literal["victory", "defeat"]
 
+KNOWN_TIERS: tuple[str, ...] = (
+    "IRON",
+    "BRONZE",
+    "SILVER",
+    "GOLD",
+    "PLATINUM",
+    "EMERALD",
+    "DIAMOND",
+    "MASTER",
+    "GRANDMASTER",
+    "CHALLENGER",
+)
+
+
+def normalize_tier(tier_str: str | None) -> str:
+    """Normalize a tier string (e.g. 'CHALLENGER I 500 LP', 'gold', 'Emerald IV') to a standard tier name."""
+    if not tier_str or not isinstance(tier_str, str):
+        return "UNKNOWN"
+    upper = tier_str.strip().upper()
+    for tier in KNOWN_TIERS:
+        # Check word boundary or substring
+        if tier in upper.split() or upper.startswith(tier):
+            return tier
+    for tier in KNOWN_TIERS:
+        if tier in upper:
+            return tier
+    return "UNKNOWN"
+
 
 @dataclass(frozen=True, slots=True)
 class RoundObservation:
@@ -39,6 +67,7 @@ class RoundObservation:
     outcome: RoundOutcome
     input_state: dict[str, Any]
     metatft_win_prob: float | None = None
+    tier_category: str | None = None
 
     @property
     def label(self) -> int:
@@ -79,6 +108,7 @@ class RoundObservation:
     def to_record(self) -> dict[str, str | int | float | None]:
         """Return a CSV-friendly representation with nested inputs as JSON."""
 
+        effective_tier_category = self.tier_category or normalize_tier(self.focal_tier or self.avg_match_rating)
         return {
             "observation_id": self.observation_id,
             "match_id": self.match_id,
@@ -92,6 +122,7 @@ class RoundObservation:
             "portal": self.portal,
             "focal_player": self.focal_player,
             "focal_tier": self.focal_tier,
+            "tier_category": effective_tier_category,
             "focal_rating_numeric": self.focal_rating_numeric,
             "avg_match_rating": self.avg_match_rating,
             "avg_match_rating_numeric": self.avg_match_rating_numeric,

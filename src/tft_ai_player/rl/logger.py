@@ -25,9 +25,9 @@ def check_collapse_warnings(metrics: dict[str, Any]) -> list[str]:
     # 1. Policy Entropy
     entropy = metrics.get("policy_entropy")
     if entropy is not None:
-        if entropy < 0.05:
+        if entropy <= 0.05:
             warnings.append(
-                f"Entropy Collapse (entropy={entropy:.3f} < 0.05): Policy prematurely collapsing into single action."
+                f"Entropy Collapse (entropy={entropy:.3f} <= 0.05): Policy prematurely collapsing into single action."
             )
         elif entropy > 4.0:
             warnings.append(

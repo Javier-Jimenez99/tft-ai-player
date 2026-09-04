@@ -52,12 +52,19 @@ class RoundWinnerTrainer:
         self.feature_names_: list[str] = []
         self.metadata_: dict[str, Any] = {}
 
-    def load_dataset(self, data_dir: Path | str) -> pd.DataFrame:
+    def load_dataset(
+        self,
+        data_dir: Path | str,
+        *,
+        allowed_tiers: Sequence[str] | None = ("CHALLENGER",),
+    ) -> pd.DataFrame:
         """Load and clean round observations from directory of CSV files with damage calculation."""
         path = Path(data_dir)
         csv_files = list(path.glob("*.csv"))
         if not csv_files and (path / "players").exists():
             csv_files = list((path / "players").glob("*.csv"))
+        if not csv_files and (path / "tiers").exists():
+            csv_files = list((path / "tiers").rglob("*.csv"))
         if not csv_files:
             csv_files = list(path.rglob("*.csv"))
         if not csv_files:
@@ -77,6 +84,29 @@ class RoundWinnerTrainer:
         df_clean = df_raw.dropna(subset=["label"]).copy()
         df_clean["label"] = df_clean["label"].astype(int)
         df_clean = df_clean.drop_duplicates(subset=["match_id", "round_stage", "focal_player"]).reset_index(drop=True)
+
+        # Tier filtering guardrail (e.g. only CHALLENGER data)
+        if allowed_tiers is not None and len(df_clean) > 0:
+            target_tiers = {t.strip().upper() for t in allowed_tiers if t.strip()}
+            if target_tiers:
+                tier_col_mask = pd.Series(False, index=df_clean.index)
+                has_tier_col = False
+                if "tier_category" in df_clean.columns:
+                    tier_col_mask |= df_clean["tier_category"].fillna("").astype(str).str.upper().isin(target_tiers)
+                    has_tier_col = True
+                if "focal_tier" in df_clean.columns:
+                    tier_col_mask |= df_clean["focal_tier"].fillna("").astype(str).str.upper().apply(
+                        lambda s: any(t in s for t in target_tiers)
+                    )
+                    has_tier_col = True
+                if "avg_match_rating" in df_clean.columns:
+                    tier_col_mask |= df_clean["avg_match_rating"].fillna("").astype(str).str.upper().apply(
+                        lambda s: any(t in s for t in target_tiers)
+                    )
+                    has_tier_col = True
+
+                if has_tier_col and tier_col_mask.any():
+                    df_clean = df_clean[tier_col_mask].reset_index(drop=True)
 
         # Compute empirical ground-truth HP loss across consecutive rounds
         if "focal_health" in df_clean.columns:

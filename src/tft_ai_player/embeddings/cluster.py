@@ -88,6 +88,7 @@ def load_curated_endgame_snapshots(
     min_stage: int = 5,
     max_placement: int = 4,
     max_samples: int | None = None,
+    allowed_tiers: Sequence[str] | None = ("CHALLENGER",),
 ) -> tuple[list[CuratedEndgameBoard], ChampionVocabulary, ItemVocabulary, TraitVocabulary]:
     """Curate end-game snapshots from Top-4 finishing players at Stage >= min_stage.
 
@@ -112,6 +113,8 @@ def load_curated_endgame_snapshots(
                 raw_files = list(path.glob("*.csv"))
                 if not raw_files and (path / "players").exists():
                     raw_files = list((path / "players").glob("*.csv"))
+                if not raw_files and (path / "tiers").exists():
+                    raw_files = list((path / "tiers").rglob("*.csv"))
                 if not raw_files:
                     raw_files = list(path.rglob("*.csv"))
         elif isinstance(target_data, pd.DataFrame):
@@ -120,6 +123,11 @@ def load_curated_endgame_snapshots(
             raw_records = list(target_data)
 
     trajectories: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    target_tiers = (
+        {t.strip().upper() for t in allowed_tiers if t.strip()}
+        if allowed_tiers is not None
+        else None
+    )
 
     if raw_files:
         iterator = tqdm(raw_files, desc="Scanning match CSVs", unit="file")
@@ -132,6 +140,21 @@ def load_curated_endgame_snapshots(
                         fp = str(row.get("focal_player", "")).strip()
                         if not mid or not fp:
                             continue
+
+                        if target_tiers:
+                            tier_cat = str(row.get("tier_category", "")).strip().upper()
+                            focal_tier = str(row.get("focal_tier", "")).strip().upper()
+                            avg_rating = str(row.get("avg_match_rating", "")).strip().upper()
+                            has_tier_info = bool(tier_cat or focal_tier or avg_rating)
+                            if has_tier_info:
+                                matches = (
+                                    tier_cat in target_tiers
+                                    or any(t in focal_tier for t in target_tiers)
+                                    or any(t in avg_rating for t in target_tiers)
+                                )
+                                if not matches:
+                                    continue
+
                         stage_str = str(row.get("round_stage", "")).strip()
                         stage_tuple = parse_stage_string(stage_str)
                         placement_raw = row.get("placement") or row.get("focal_placement") or row.get("rank")
@@ -155,6 +178,21 @@ def load_curated_endgame_snapshots(
             fp = str(r.get("focal_player", "")).strip()
             if not mid or not fp:
                 continue
+
+            if target_tiers:
+                tier_cat = str(r.get("tier_category", "")).strip().upper()
+                focal_tier = str(r.get("focal_tier", "")).strip().upper()
+                avg_rating = str(r.get("avg_match_rating", "")).strip().upper()
+                has_tier_info = bool(tier_cat or focal_tier or avg_rating)
+                if has_tier_info:
+                    matches = (
+                        tier_cat in target_tiers
+                        or any(t in focal_tier for t in target_tiers)
+                        or any(t in avg_rating for t in target_tiers)
+                    )
+                    if not matches:
+                        continue
+
             stage_str = str(r.get("round_stage", "")).strip()
             stage_tuple = parse_stage_string(stage_str)
             placement_raw = r.get("placement") or r.get("focal_placement") or r.get("rank")
@@ -1239,6 +1277,7 @@ def run_clustering_pipeline(
     output_dir: str | Path = "models/clustering",
     synthetic: bool = False,
     max_samples: int | None = None,
+    allowed_tiers: Sequence[str] | None = ("CHALLENGER",),
 ) -> dict[str, Any]:
     """Orchestrate the end-to-end Z-Index clustering and profiling pipeline."""
     print("=" * 75)
@@ -1270,6 +1309,7 @@ def run_clustering_pipeline(
             min_stage=min_stage,
             max_placement=max_placement,
             max_samples=max_samples,
+            allowed_tiers=allowed_tiers,
         )
 
     print(f" [+] Extracted {len(boards)} curated winning endgame boards.")
