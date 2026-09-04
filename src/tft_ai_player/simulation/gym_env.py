@@ -391,55 +391,44 @@ class TFTEnv(gym.Env):
         if not is_pass:
             # 1. Sequential Decision Execution
             gold_before = focal.gold
-            prev_s_t = self.current_s_t
-            prev_h_board = self.current_h_board
+            board_count_before = focal.board_unit_count
+            stars_before = sum(u.star_level for u in focal.board.values()) + sum(u.star_level for u in focal.bench if u is not None)
+            traits_before = sum(focal.get_active_traits().values())
 
             success = execute_action(focal, self.game.pool, self.set_data, action)
             self.actions_in_current_round += 1
 
             if success:
-                # Dense potential-based reward shaping per micro-action:
-                stage = self.game.stage_manager.stage
-                round_in_stage = self.game.stage_manager.round_in_stage
-                _, s_next, h_board_next = self.encoder.extract_state_vector(
-                    player=focal,
-                    stage=stage,
-                    round_in_stage=round_in_stage,
-                    target_z=self.target_z,
-                )
-
-                # Micro alignment delta towards World Model predicted state ŝ_{t+1}:
-                r_micro_step = 0.0
-                if self.current_s_hat_next is not None and prev_s_t is not None:
-                    cos_prev = float(F.cosine_similarity(prev_s_t.unsqueeze(0), self.current_s_hat_next.unsqueeze(0)).item())
-                    cos_next = float(F.cosine_similarity(s_next.unsqueeze(0), self.current_s_hat_next.unsqueeze(0)).item())
-                    r_micro_step = cos_next - cos_prev
-
-                # Macro alignment delta towards Target Archetype centroid:
-                r_macro_step = 0.0
-                if self.target_z is not None and prev_h_board is not None:
-                    z_target_tensor = torch.as_tensor(self.target_z, dtype=torch.float32, device=self.device)
-                    if z_target_tensor.norm() > 1e-6:
-                        cos_macro_prev = float(F.cosine_similarity(prev_h_board.unsqueeze(0), z_target_tensor.unsqueeze(0)).item())
-                        cos_macro_next = float(F.cosine_similarity(h_board_next.unsqueeze(0), z_target_tensor.unsqueeze(0)).item())
-                        r_macro_step = cos_macro_next - cos_macro_prev
-
-                # Economy threshold delta (e.g. selling low-priority units to hit 10g/20g/30g/40g/50g):
+                # Fast CPU step reward shaping (runtime < 2 microseconds):
+                # A. Economy interest threshold delta
                 interest_prev = min(5, gold_before // 10)
                 interest_next = min(5, focal.gold // 10)
                 r_interest_step = float(interest_next - interest_prev) * 0.05
 
+                # B. Star-up upgrades (completing 2-star or 3-star champions)
+                stars_after = sum(u.star_level for u in focal.board.values()) + sum(u.star_level for u in focal.bench if u is not None)
+                delta_stars = max(0, stars_after - stars_before)
+                r_stars_step = float(delta_stars) * 0.15
+
+                # C. Synergies and trait tier activation
+                traits_after = sum(focal.get_active_traits().values())
+                delta_traits = max(0, traits_after - traits_before)
+                r_traits_step = float(delta_traits) * 0.05
+
+                # D. Board capacity deployment (filling vacant board slots)
+                board_count_after = focal.board_unit_count
+                delta_deployed = max(0, board_count_after - board_count_before)
+                r_deploy_step = float(delta_deployed) * 0.05
+
                 # Total shaped step reward
-                reward = (self.current_beta * r_micro_step) + (self.current_alpha * r_macro_step) + r_interest_step
-                self.current_s_t = s_next
-                self.current_h_board = h_board_next
+                reward = r_interest_step + r_stars_step + r_traits_step + r_deploy_step
                 r_step_env = r_interest_step
             else:
                 # Small penalty for invalid or no-op action
                 reward = -0.02
-                r_micro_step = 0.0
-                r_macro_step = 0.0
                 r_interest_step = 0.0
+                r_stars_step = 0.0
+                r_traits_step = 0.0
                 r_step_env = -0.02
 
             reward_breakdown = {
@@ -447,8 +436,8 @@ class TFTEnv(gym.Env):
                 "r_combat": 0.0,
                 "r_interest": r_interest_step,
                 "r_terminal": 0.0,
-                "r_macro": r_macro_step,
-                "r_micro": r_micro_step,
+                "r_macro": r_traits_step,
+                "r_micro": r_stars_step,
                 "alpha": self.current_alpha,
                 "beta": self.current_beta,
             }

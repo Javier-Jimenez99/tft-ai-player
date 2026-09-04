@@ -60,6 +60,7 @@ class ShopBeamSearchPlanner:
         w_econ: float = 0.3,
         w_stars: float = 0.25,
         w_traits: float = 0.15,
+        use_neural_eval: bool = False,
         device: torch.device | None = None,
     ) -> None:
         self.set_data = set_data
@@ -71,6 +72,7 @@ class ShopBeamSearchPlanner:
         self.w_econ = w_econ
         self.w_stars = w_stars
         self.w_traits = w_traits
+        self.use_neural_eval = use_neural_eval
         self.device = device or torch.device("cpu")
         self.action_queue: list[int] = []
 
@@ -274,26 +276,14 @@ class ShopBeamSearchPlanner:
 
         # Phase 4: Beam Selection via Fast Heuristic Filter
         candidates.sort(key=lambda n: n.heuristic_score, reverse=True)
-        top_candidates = candidates[: self.beam_width]
+        best_node = candidates[0] if candidates else root_node
 
-        # Phase 5: Deep Neural Evaluation of Top Candidates
-        best_node = root_node
-        best_score = root_score
-
-        for node in top_candidates:
-            if node is root_node:
-                continue
-            n_score = self.evaluate_neural_score(
-                player=node.player,
-                stage=stage,
-                round_in_stage=round_in_stage,
-                target_z=target_z,
-                s_hat_next=s_hat_next,
-            )
-            node.neural_score = n_score
-            if n_score > best_score:
-                best_score = n_score
-                best_node = node
+        # Optional single-check neural verification if explicitly requested
+        if getattr(self, "use_neural_eval", False) and self.encoder is not None and best_node is not root_node:
+            best_n_score = self.evaluate_neural_score(best_node.player, stage, round_in_stage, target_z, s_hat_next)
+            root_n_score = self.evaluate_neural_score(root_node.player, stage, round_in_stage, target_z, s_hat_next)
+            if root_n_score > best_n_score:
+                best_node = root_node
 
         # Phase 6: Reroll Check (Action 6)
         final_actions = list(best_node.actions)
