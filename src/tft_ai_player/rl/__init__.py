@@ -12,6 +12,7 @@ from tft_ai_player.rl.league.league_manager import LeagueManager
 from tft_ai_player.rl.logger import WandBLogger, check_collapse_warnings
 from tft_ai_player.rl.models.distributions import MaskedCategorical, numpy_masked_sample, numpy_masked_softmax
 from tft_ai_player.rl.models.networks import ShopBenchFeatureExtractor, TFTActorCritic
+from tft_ai_player.rl.planner import ShopBeamSearchPlanner
 from tft_ai_player.rl.train import LeagueTrainer
 from tft_ai_player.rl.types import AgentProfile, AgentRole, EloRating, MatchResult
 
@@ -29,6 +30,7 @@ __all__ = [
     "MultilateralEloSystem",
     "RLBot",
     "RolloutBuffer",
+    "ShopBeamSearchPlanner",
     "ShopBenchFeatureExtractor",
     "TFTActorCritic",
     "TournamentEvaluator",

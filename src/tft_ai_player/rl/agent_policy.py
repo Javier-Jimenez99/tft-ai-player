@@ -9,6 +9,7 @@ import torch
 
 from tft_ai_player.embeddings.model import MultiModalFusionTrunk
 from tft_ai_player.rl.models.networks import TFTActorCritic
+from tft_ai_player.rl.planner import ShopBeamSearchPlanner
 from tft_ai_player.simulation.actions import execute_action, get_action_mask
 from tft_ai_player.simulation.config import SetData
 from tft_ai_player.simulation.gym_env import TFTStateEncoder
@@ -60,6 +61,7 @@ class RLBot:
         is_historical: bool = False,
         alpha: float = 0.5,
         beta: float = 0.3,
+        use_planner: bool = True,
     ) -> None:
         self.model = model
         self.set_data = set_data
@@ -75,6 +77,7 @@ class RLBot:
         self.record_transitions = record_transitions and not is_historical
         self.alpha = float(alpha)
         self.beta = float(beta)
+        self.use_planner = use_planner
         if device is not None:
             self.device = device
         elif model is not None and len(list(model.parameters())) > 0:
@@ -83,6 +86,13 @@ class RLBot:
             self.device = torch.device("cpu")
 
         self.encoder = TFTStateEncoder(set_data=set_data, trunk=trunk, device=self.device)
+        self.planner = ShopBeamSearchPlanner(
+            set_data=set_data,
+            encoder=self.encoder,
+            world_model=world_model,
+            beam_width=8,
+            device=self.device,
+        )
         self.model.to(self.device)
         self.model.eval()
 
@@ -98,6 +108,42 @@ class RLBot:
     ) -> None:
         """Execute bot planning turn by repeatedly predicting and executing micro-actions until PASS (0)."""
         if not player.alive:
+            return
+
+        if self.use_planner:
+            actions_taken = 0
+            while actions_taken < self.max_micro_actions:
+                planned_actions = self.planner.plan_shop_sequence(
+                    player=player,
+                    pool=pool,
+                    stage=stage,
+                    round_in_stage=round_in_stage,
+                    target_z=self.target_z,
+                )
+                if not planned_actions:
+                    break
+
+                reroll_executed = False
+                for action_id in planned_actions:
+                    if actions_taken >= self.max_micro_actions:
+                        break
+                    if action_id == 0:
+                        break
+
+                    mask = get_action_mask(player, set_data)
+                    if not mask[action_id]:
+                        continue
+
+                    success = execute_action(player, pool, set_data, action_id, rng=rng)
+                    actions_taken += 1
+
+                    if action_id == 6:
+                        # Reroll occurred: plan next shop window
+                        reroll_executed = True
+                        break
+
+                if not reroll_executed:
+                    break
             return
 
         actions_taken = 0

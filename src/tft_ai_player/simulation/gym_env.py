@@ -390,16 +390,67 @@ class TFTEnv(gym.Env):
 
         if not is_pass:
             # 1. Sequential Decision Execution
+            gold_before = focal.gold
+            prev_s_t = self.current_s_t
+            prev_h_board = self.current_h_board
+
             success = execute_action(focal, self.game.pool, self.set_data, action)
             self.actions_in_current_round += 1
-            reward = 0.0
+
+            if success:
+                # Dense potential-based reward shaping per micro-action:
+                stage = self.game.stage_manager.stage
+                round_in_stage = self.game.stage_manager.round_in_stage
+                _, s_next, h_board_next = self.encoder.extract_state_vector(
+                    player=focal,
+                    stage=stage,
+                    round_in_stage=round_in_stage,
+                    target_z=self.target_z,
+                )
+
+                # Micro alignment delta towards World Model predicted state ŝ_{t+1}:
+                r_micro_step = 0.0
+                if self.current_s_hat_next is not None and prev_s_t is not None:
+                    cos_prev = float(F.cosine_similarity(prev_s_t.unsqueeze(0), self.current_s_hat_next.unsqueeze(0)).item())
+                    cos_next = float(F.cosine_similarity(s_next.unsqueeze(0), self.current_s_hat_next.unsqueeze(0)).item())
+                    r_micro_step = cos_next - cos_prev
+
+                # Macro alignment delta towards Target Archetype centroid:
+                r_macro_step = 0.0
+                if self.target_z is not None and prev_h_board is not None:
+                    z_target_tensor = torch.as_tensor(self.target_z, dtype=torch.float32, device=self.device)
+                    if z_target_tensor.norm() > 1e-6:
+                        cos_macro_prev = float(F.cosine_similarity(prev_h_board.unsqueeze(0), z_target_tensor.unsqueeze(0)).item())
+                        cos_macro_next = float(F.cosine_similarity(h_board_next.unsqueeze(0), z_target_tensor.unsqueeze(0)).item())
+                        r_macro_step = cos_macro_next - cos_macro_prev
+
+                # Economy threshold delta (e.g. selling low-priority units to hit 10g/20g/30g/40g/50g):
+                interest_prev = min(5, gold_before // 10)
+                interest_next = min(5, focal.gold // 10)
+                r_interest_step = float(interest_next - interest_prev) * 0.05
+
+                # Total shaped step reward
+                reward = (self.current_beta * r_micro_step) + (self.current_alpha * r_macro_step) + r_interest_step
+                self.current_s_t = s_next
+                self.current_h_board = h_board_next
+                r_step_env = r_interest_step
+            else:
+                # Small penalty for invalid or no-op action
+                reward = -0.02
+                r_micro_step = 0.0
+                r_macro_step = 0.0
+                r_interest_step = 0.0
+                r_step_env = -0.02
+
             reward_breakdown = {
-                "r_env": 0.0,
+                "r_env": r_step_env,
                 "r_combat": 0.0,
-                "r_interest": 0.0,
+                "r_interest": r_interest_step,
                 "r_terminal": 0.0,
-                "r_macro": 0.0,
-                "r_micro": 0.0,
+                "r_macro": r_macro_step,
+                "r_micro": r_micro_step,
+                "alpha": self.current_alpha,
+                "beta": self.current_beta,
             }
         else:
             # 2. Planning phase finalized -> Combat Resolution
@@ -434,7 +485,7 @@ class TFTEnv(gym.Env):
 
             r_env = r_combat + r_interest + r_terminal
 
-            # 3. Micro Supervised Alignment (R_micro) & Macro Alignment (R_macro)
+            # 3. Macro Alignment (R_macro) & Micro Alignment (R_micro) at round boundary
             stage = self.game.stage_manager.stage
             round_in_stage = self.game.stage_manager.round_in_stage
             _, s_next, h_board_next = self.encoder.extract_state_vector(
@@ -464,7 +515,7 @@ class TFTEnv(gym.Env):
                     best_k = int(torch.argmax(sims).item())
                     cluster_match = 1.0 if best_k == self.current_target_z_index else 0.0
 
-            # Total Multi-Objective Step Reward
+            # Round outcome reward
             reward = r_env + (self.current_alpha * r_macro) + (self.current_beta * r_micro)
             reward_breakdown = {
                 "r_env": r_env,

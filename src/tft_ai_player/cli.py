@@ -397,11 +397,20 @@ def _build_parser() -> argparse.ArgumentParser:
         default=default_trunk_ckpt,
         help=f"path to pre-trained frozen MultiModalFusionTrunk checkpoint (default: {default_trunk_ckpt})",
     )
+    default_world_model_ckpt = (
+        "models/transition_predictor/predictor_best.pt"
+        if Path("models/transition_predictor/predictor_best.pt").exists()
+        else (
+            "D:/tft-winner-data/set18/models/transition/best_model.pt"
+            if Path("D:/tft-winner-data/set18/models/transition/best_model.pt").exists()
+            else "models/transition_predictor/predictor_final.pt"
+        )
+    )
     rl_train_parser.add_argument(
         "--world-model-checkpoint",
         type=str,
-        default="D:/tft-winner-data/set18/models/transition/best_model.pt",
-        help="path to pre-trained StateTransitionPredictor (World Model) checkpoint",
+        default=default_world_model_ckpt,
+        help=f"path to pre-trained StateTransitionPredictor (World Model) checkpoint (default: {default_world_model_ckpt})",
     )
     rl_train_parser.add_argument(
         "--z-index-path",
@@ -1078,6 +1087,18 @@ def _build_parser() -> argparse.ArgumentParser:
         default=True,
         help="do not automatically wait for CDN rate limit cooldown (default: auto-waits cooldown and resumes)",
     )
+    download_parser.add_argument(
+        "--proxy",
+        type=str,
+        default=os.environ.get("ALL_PROXY") or os.environ.get("SOCKS_PROXY") or os.environ.get("HTTPS_PROXY"),
+        help="optional HTTP or SOCKS5 proxy URL (e.g. socks5://127.0.0.1:9050 or socks5://127.0.0.1:40000)",
+    )
+    download_parser.add_argument(
+        "--tor-control-port",
+        type=int,
+        default=None,
+        help="optional Tor ControlPort (e.g. 9051) to instantly rotate IP identity on HTTP 429 rate limit",
+    )
 
     plot_graph_parser = subcommands.add_parser(
         "plot-graph",
@@ -1494,8 +1515,64 @@ def _run_expand_graph(args: argparse.Namespace) -> int:
     return 0
 
 
+def _rotate_tor_identity(control_host: str = "127.0.0.1", control_port: int = 9051) -> bool:
+    """Request a fresh Tor circuit/IP by sending SIGNAL NEWNYM to Tor control port."""
+    try:
+        import socket
+        try:
+            import socks
+            raw_socket = socks.socksocket(socket.AF_INET, socket.SOCK_STREAM)
+            raw_socket.set_proxy()  # Direct localhost connection bypassing proxy monkeypatch
+        except Exception:
+            raw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        raw_socket.settimeout(5.0)
+        raw_socket.connect((control_host, control_port))
+        raw_socket.sendall(b'AUTHENTICATE ""\r\n')
+        auth_resp = raw_socket.recv(1024)
+        if b"250" not in auth_resp:
+            raw_socket.close()
+            return False
+        raw_socket.sendall(b"SIGNAL NEWNYM\r\n")
+        sig_resp = raw_socket.recv(1024)
+        raw_socket.close()
+        return b"250" in sig_resp
+    except Exception:
+        return False
+
+
+def _setup_proxy(proxy_str: str) -> None:
+    """Configure global socket or HTTP proxy for requests."""
+    from urllib.parse import urlparse
+    parsed = urlparse(proxy_str if "://" in proxy_str else f"socks5://{proxy_str}")
+    if parsed.scheme.startswith("socks"):
+        try:
+            import socks
+            import socket
+            proxy_type = socks.SOCKS5 if "5" in parsed.scheme else socks.SOCKS4
+            port = parsed.port or 1080
+            socks.set_default_proxy(
+                proxy_type,
+                parsed.hostname,
+                port,
+                rdns=True,
+                username=parsed.username,
+                password=parsed.password,
+            )
+            socket.socket = socks.socksocket
+        except ImportError:
+            raise RuntimeError("PySocks is required for SOCKS proxy support. Install with: pip install pysocks")
+    elif parsed.scheme.startswith("http"):
+        import os
+        os.environ["http_proxy"] = proxy_str
+        os.environ["https_proxy"] = proxy_str
+
+
 def _run_download_games(args: argparse.Namespace) -> int:
     """Step 2: Download match timelines and extract PVP observations from the games manifest produced in Step 1."""
+    proxy = getattr(args, "proxy", None) or os.environ.get("ALL_PROXY") or os.environ.get("SOCKS_PROXY") or os.environ.get("HTTPS_PROXY")
+    if proxy:
+        _setup_proxy(proxy)
+
     graph = PlayerGraph()
     manifest_dir = Path(args.manifest_dir)
     if not manifest_dir.exists():
@@ -1647,7 +1724,42 @@ def _run_download_games(args: argparse.Namespace) -> int:
                     )
                 except MetaTftRequestError as e:
                     if "429" in str(e):
-                        if getattr(args, "auto_wait_cooldown", True):
+                        tor_port = getattr(args, "tor_control_port", None)
+                        if tor_port is None and proxy and "9050" in proxy:
+                            tor_port = 9051
+
+                        tor_success = False
+                        if tor_port:
+                            tqdm.write(f"\n [!] MetaTFT match CDN is rate-limited (HTTP 429). Rotating Tor circuit via ControlPort {tor_port}...")
+                            for rotate_attempt in range(1, 4):
+                                if _rotate_tor_identity(control_port=tor_port):
+                                    tqdm.write(f" [!] New Tor circuit requested ({rotate_attempt}/3). Waiting 2.5s for route establishment...")
+                                    time.sleep(2.5)
+                                    try:
+                                        timeline = client.fetch_timeline(game.timeline_url)
+                                        observations = extract_pvp_rounds(
+                                            timeline,
+                                            match_id=game.match_uuid,
+                                            tft_set=game.tft_set or args.tft_set,
+                                            game_version="unknown",
+                                            focal_tier=game.tier,
+                                            avg_match_rating=game.avg_rating,
+                                        )
+                                        tor_success = True
+                                        break
+                                    except MetaTftRequestError as retry_429:
+                                        if "429" in str(retry_429):
+                                            tqdm.write(f" [!] New exit node also rate-limited. Retrying Tor rotation ({rotate_attempt}/3)...")
+                                            continue
+                                        raise
+                                    except Exception:
+                                        raise
+                                else:
+                                    tqdm.write(f" [!] Failed to contact Tor ControlPort {tor_port}.")
+                                    break
+                        if tor_success:
+                            pass
+                        elif getattr(args, "auto_wait_cooldown", True):
                             retry_sec = getattr(e, "retry_after", None) or 300.0
                             tqdm.write(f"\n [!] MetaTFT match CDN is rate-limited (HTTP 429). Cooldown: ~{int(retry_sec)}s ({int(retry_sec)//60}m). Auto-waiting before resuming downloads...")
                             end_time = time.monotonic() + retry_sec + 2.0
@@ -1665,7 +1777,7 @@ def _run_download_games(args: argparse.Namespace) -> int:
                                     game_version="unknown",
                                     focal_tier=game.tier,
                                     avg_match_rating=game.avg_rating,
-                                )
+                                    )
                             except Exception as retry_err:
                                 tqdm.write(f"skipped game {game.match_uuid}: {retry_err}", file=sys.stderr)
                                 seen_game_ids.add(game.match_uuid)

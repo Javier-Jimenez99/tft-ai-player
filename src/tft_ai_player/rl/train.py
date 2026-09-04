@@ -17,10 +17,11 @@ from tft_ai_player.rl.evaluation.evaluator import BenchmarkBotEvaluator, Tournam
 from tft_ai_player.rl.league.league_manager import LeagueManager
 from tft_ai_player.rl.logger import WandBLogger, check_collapse_warnings
 from tft_ai_player.rl.models.networks import TFTActorCritic
+from tft_ai_player.rl.planner import ShopBeamSearchPlanner
 from tft_ai_player.simulation.actions import TOTAL_DISCRETE_ACTIONS
 from tft_ai_player.simulation.combat import CombatResolver, HeuristicCombatResolver, MLCombatResolver
 from tft_ai_player.simulation.config import SetData
-from tft_ai_player.simulation.gym_env import TFTEnv
+from tft_ai_player.simulation.gym_env import TFTEnv, TFTStateEncoder
 from tft_ai_player.simulation.sets.set18 import get_set18_data
 
 logger = logging.getLogger(__name__)
@@ -274,11 +275,19 @@ class LeagueTrainer:
                 except Exception as e:
                     logger.warning(f"Could not resume from {latest_ckpt}: {e}")
 
-        # 8. Evaluators
+        # 8. Evaluators & Tree Search Planner
+        self.planner = ShopBeamSearchPlanner(
+            set_data=self.set_data,
+            encoder=TFTStateEncoder(set_data=self.set_data, trunk=self.trunk, device=self.device),
+            world_model=self.world_model,
+            beam_width=8,
+            device=self.device,
+        )
         self.bench_evaluator = BenchmarkBotEvaluator(
             set_data=self.set_data,
             combat_resolver=self.combat_resolver,
             trunk=self.trunk,
+            world_model=self.world_model,
         )
         self.tournament_evaluator = TournamentEvaluator(
             league=self.league,
@@ -286,6 +295,7 @@ class LeagueTrainer:
             combat_resolver=self.combat_resolver,
             trunk=self.trunk,
         )
+        self.current_progress = 0.0
 
         # 9. WandB Experiment Logger
         config_dict = {
@@ -351,14 +361,53 @@ class LeagueTrainer:
 
         macro_sims: list[float] = []
         cluster_matches: list[float] = []
+        planned_queue: list[int] = []
+        guided_actions_count = 0
+        total_planning_actions = 0
+        planner_agreements = 0
 
         while active_buffer.ptr < target_steps:
+            focal_player = env.game.get_focal_player()
+            rinfo = env.game.stage_manager.get_current_round_info()
+
+            # Plan lookahead actions for current visible shop if queue is empty
+            if not planned_queue and focal_player.alive:
+                planned_queue = self.planner.plan_shop_sequence(
+                    player=focal_player,
+                    pool=env.game.pool,
+                    stage=rinfo.stage,
+                    round_in_stage=rinfo.round_in_stage,
+                    target_z=env.target_z,
+                )
+
             obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
             mask_t = torch.as_tensor(mask, dtype=torch.bool, device=self.device).unsqueeze(0)
 
             with torch.no_grad():
-                action_t, log_prob_t, val_t = active_model.get_action(obs_t, mask_t)
-                action = int(action_t.item())
+                action_t, _, _ = active_model.get_action(obs_t, mask_t)
+                neural_action = int(action_t.item())
+
+            # Decide whether to execute tree-search planned action or neural policy action
+            guide_prob = max(0.2, 0.7 * (1.0 - getattr(self, "current_progress", 0.0)))
+            selected_action = neural_action
+
+            if planned_queue:
+                rec_action = planned_queue.pop(0)
+                if mask[rec_action]:
+                    if rec_action == neural_action:
+                        planner_agreements += 1
+                    total_planning_actions += 1
+
+                    if np.random.random() < guide_prob:
+                        selected_action = rec_action
+                        guided_actions_count += 1
+
+            action = selected_action
+
+            # Evaluate log_prob and value for the executed action
+            with torch.no_grad():
+                act_t = torch.tensor([action], dtype=torch.long, device=self.device)
+                log_prob_t, _, val_t = active_model.evaluate_actions(obs_t, act_t, mask_t)
                 log_prob = float(log_prob_t.item())
                 value = float(val_t.item())
 
@@ -369,6 +418,10 @@ class LeagueTrainer:
             next_obs, reward, terminated, truncated, next_info = env.step(action)
             next_mask = next_info["action_mask"]
             done = terminated or truncated
+
+            # If reroll (action 6), clear planned_queue to re-plan the newly rolled shop
+            if action == 6:
+                planned_queue.clear()
 
             active_buffer.add(
                 obs=obs,
@@ -391,6 +444,7 @@ class LeagueTrainer:
                     current_ep_breakdown[k] += rb.get(k, 0.0)
 
             if done:
+                planned_queue.clear()
                 episode_rewards.append(current_ep_reward)
                 episode_breakdowns.append(dict(current_ep_breakdown))
                 current_ep_breakdown = {k: 0.0 for k in current_ep_breakdown}
@@ -434,6 +488,9 @@ class LeagueTrainer:
         target_cluster_match_rate = float(np.mean(cluster_matches)) * 100.0 if cluster_matches else 0.0
         macro_alignment_cosine = float(np.mean(macro_sims)) if macro_sims else 0.0
 
+        guided_pct = float(guided_actions_count / max(1, active_buffer.ptr)) * 100.0
+        agreement_pct = float(planner_agreements / max(1, total_planning_actions)) * 100.0
+
         return {
             "mean_reward": mean_rew,
             "avg_placement": avg_place,
@@ -449,6 +506,8 @@ class LeagueTrainer:
             "reward_env_total": mean_breakdown["r_env"],
             "target_cluster_match_rate": target_cluster_match_rate,
             "macro_alignment_cosine": macro_alignment_cosine,
+            "guided_actions_pct": guided_pct,
+            "planner_agreement_pct": agreement_pct,
             "action_buy_xp_pct": buy_xp_pct,
             "action_pass_pct": pass_pct,
             "action_equip_item_pct": equip_item_pct,
@@ -462,6 +521,7 @@ class LeagueTrainer:
         """Execute one full generation of Unified Alpha League self-play training."""
         # 1. Dynamically adapt entropy coefficient and learning rate to total generations schedule
         progress = max(0.0, min(1.0, float(generation) / max(1, self.max_generations)))
+        self.current_progress = progress
 
         # Dynamic Cosine Annealing from entropy_coef_start down to entropy_coef_min:
         current_entropy = self.entropy_coef_min + 0.5 * (self.entropy_coef - self.entropy_coef_min) * (1.0 + math.cos(math.pi * progress))
@@ -605,10 +665,10 @@ class LeagueTrainer:
                 f"Reward: {metrics['mean_reward']:+0.3f} | "
                 f"Avg Place: {metrics['avg_placement']:.2f} | "
                 f"Top-4: {metrics['top4_rate']*100:4.1f}% | "
-                f"Loss: {metrics['policy_loss']:+0.3f} | "
+                f"PlanAgr: {metrics.get('planner_agreement_pct', 0.0):4.1f}% | "
+                f"Guided: {metrics.get('guided_actions_pct', 0.0):4.1f}% | "
                 f"ExpVar: {metrics['explained_variance']:.3f} | "
-                f"Entropy: {metrics['policy_entropy']:.3f} | "
-                f"KL: {metrics['approx_kl']:.4f}"
+                f"Loss: {metrics['policy_loss']:+0.3f}"
             )
 
         self.wandb_logger.close()

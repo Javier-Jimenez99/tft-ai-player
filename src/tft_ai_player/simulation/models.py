@@ -24,6 +24,10 @@ class ItemInstance:
     name: str
     is_component: bool = False
 
+    def clone(self) -> ItemInstance:
+        """Create an isolated clone of this item instance."""
+        return ItemInstance(item_id=self.item_id, name=self.name, is_component=self.is_component)
+
 
 @dataclass(slots=True)
 class ChampionInstance:
@@ -34,6 +38,16 @@ class ChampionInstance:
     star_level: int = 1
     items: list[str] = field(default_factory=list)
     position: tuple[int, int] | None = None  # (row 0..3, col 0..6) if on board
+
+    def clone(self) -> ChampionInstance:
+        """Create an isolated clone of this champion instance."""
+        return ChampionInstance(
+            champion_id=self.champion_id,
+            cost=self.cost,
+            star_level=self.star_level,
+            items=list(self.items),
+            position=self.position,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary matching dataset / feature extractor format."""
@@ -123,12 +137,28 @@ class ChampionPool:
                 self.return_champion(slot, star_level=1)
 
 
+    def clone(self) -> ChampionPool:
+        """Create an isolated clone of the champion pool state."""
+        cp = ChampionPool.__new__(ChampionPool)
+        cp.set_data = self.set_data
+        cp.counts = dict(self.counts)
+        cp.champions_by_cost = self.champions_by_cost
+        return cp
+
+
 class Shop:
     """Player shop offering 5 champion choices each round."""
 
     def __init__(self) -> None:
         self.slots: list[str | None] = [None, None, None, None, None]
         self.locked: bool = False
+
+    def clone(self) -> Shop:
+        """Create an isolated clone of the shop state."""
+        s = Shop()
+        s.slots = list(self.slots)
+        s.locked = self.locked
+        return s
 
     def refresh(
         self,
@@ -214,6 +244,36 @@ class Player:
         self.rengar_takedowns: int = 0
         self.ignited_shop_slots: list[int] = []
         self.combats_since_overrun: int = 0
+
+    def clone(self) -> Player:
+        """Create a high-performance isolated clone of this player state."""
+        p = Player(player_id=self.player_id, set_data=self.set_data, name=self.name)
+        p.health = self.health
+        p.gold = self.gold
+        p.level = self.level
+        p.exp = self.exp
+        p.streak = self.streak
+        p.alive = self.alive
+        p.placement = self.placement
+        p.board = {pos: unit.clone() for pos, unit in self.board.items()}
+        p.bench = [u.clone() if u is not None else None for u in self.bench]
+        p.item_bench = [it.clone() for it in self.item_bench]
+        p.shop = self.shop.clone()
+        p.last_opponents = list(self.last_opponents)
+        p.augments = list(self.augments)
+        p.duplicators = self.duplicators
+        p.reforgers = self.reforgers
+        p.removers = self.removers
+        p.extra_team_size = self.extra_team_size
+        p.max_interest_cap = self.max_interest_cap
+        p.free_rerolls = self.free_rerolls
+        p.coven_essence = self.coven_essence
+        p.fae_pixies = self.fae_pixies
+        p.draven_bounty_progress = self.draven_bounty_progress
+        p.rengar_takedowns = self.rengar_takedowns
+        p.ignited_shop_slots = list(self.ignited_shop_slots)
+        p.combats_since_overrun = self.combats_since_overrun
+        return p
 
     # -------------------------------------------------------------------------
     # Board & Unit Queries

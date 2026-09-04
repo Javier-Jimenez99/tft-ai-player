@@ -35,10 +35,12 @@ class BenchmarkBotEvaluator:
         set_data: SetData | None = None,
         combat_resolver: Any | None = None,
         trunk: MultiModalFusionTrunk | None = None,
+        world_model: Any | None = None,
     ) -> None:
         self.set_data = set_data or get_default_set17_data()
         self.combat_resolver = combat_resolver
         self.trunk = trunk
+        self.world_model = world_model
 
     def evaluate_main_agent(
         self,
@@ -51,7 +53,14 @@ class BenchmarkBotEvaluator:
         Lobby composition: 1 Main Agent + 3 Bot Alpha + 2 Bot Beta + 2 Bot Gamma.
         """
         main_model.eval()
-        main_bot = RLBot(model=main_model, set_data=self.set_data, trunk=self.trunk, deterministic=True)
+        main_bot = RLBot(
+            model=main_model,
+            set_data=self.set_data,
+            trunk=self.trunk,
+            world_model=self.world_model,
+            deterministic=True,
+            use_planner=True,
+        )
 
         placements: list[int] = []
         wins_vs_alpha = 0
