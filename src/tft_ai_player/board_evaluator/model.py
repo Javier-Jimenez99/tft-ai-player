@@ -37,13 +37,11 @@ class BoardQualityNet(nn.Module):
         self.trunk = trunk
         self.freeze_trunk = freeze_trunk
 
-        if freeze_trunk:
-            for p in self.trunk.parameters():
-                p.requires_grad = False
-
-        f_dim = self.trunk.fused_dim  # typically 320D
-        scalar_dim = 8  # Direct uncompressed scalars: [HP, Gold, Level, Streak, Stage, Round, Unit Count, Item Count]
-        in_features = f_dim + scalar_dim
+        # Isolated pure board representation (256D) + pure focal player scalars (8D) = 264D
+        # Eliminates all redundancy by bypassing StateMLP and taking raw uncompressed scalars
+        b_dim = self.trunk.board_feat_dim  # 256D pure board feature
+        scalar_dim = 8  # [HP, Gold, Level, Streak, Stage, Round, Unit Count, Item Count]
+        in_features = b_dim + scalar_dim  # 264D
 
         # 1. Placement Regression Head: E[Placement] ∈ [1.0, 8.0]
         self.placement_head = nn.Sequential(
@@ -74,15 +72,16 @@ class BoardQualityNet(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute placement prediction and Top-4 classification logits.
 
-        Combines the deep board representation from the Multi-Modal Trunk with
-        direct, uncompressed skip-connections of the focal player's current health,
-        gold, stage, and level.
+        Combines the isolated 256D board representation from the Multi-Modal Trunk
+        with the focal player's 8 uncompressed state scalars (HP, Gold, Stage, etc.),
+        ensuring zero feature duplication.
 
         Returns:
             tuple[torch.Tensor, torch.Tensor]:
                 - placement_pred: (B, 1) expected placement in [1.0, 8.0]
                 - top4_logits: (B, 2) unnormalized logits for [Not Top-4, Top-4]
         """
+        # 1. Pure board embedding (256D: units, stars, items, synergies, grid positioning)
         board_feat = self.trunk.encode_board(
             board_champ_ids=board_champ_ids,
             board_star_levels=board_star_levels,
@@ -90,19 +89,14 @@ class BoardQualityNet(nn.Module):
             board_traits=board_traits,
         )
 
-        if state_scalars is not None:
-            state_feat = self.trunk.state_mlp(state_scalars)
-            scalars_direct = state_scalars
+        # 2. Pure focal state scalars (8D: HP, Gold, Level, Streak, Stage, Round, etc.)
+        if state_scalars is None:
+            scalars_clean = torch.zeros(board_feat.shape[0], 8, device=board_feat.device)
         else:
-            state_feat = torch.zeros(
-                board_feat.shape[0], self.trunk.state_feat_dim, device=board_feat.device
-            )
-            scalars_direct = torch.zeros(board_feat.shape[0], 8, device=board_feat.device)
+            scalars_clean = state_scalars
 
-        fused = self.trunk.fusion(torch.cat([board_feat, state_feat], dim=-1))
-
-        # Direct skip-connection: fused representation + raw focal state scalars
-        combined = torch.cat([fused, scalars_direct], dim=-1)
+        # 3. Concatenate pure board (256D) + pure scalars (8D) = 264D (zero redundancy)
+        combined = torch.cat([board_feat, scalars_clean], dim=-1)
 
         raw_place = self.placement_head(combined)
         # Bounded between 1.0 (1st place) and 8.0 (8th place)
