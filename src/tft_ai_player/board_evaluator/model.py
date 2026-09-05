@@ -42,10 +42,12 @@ class BoardQualityNet(nn.Module):
                 p.requires_grad = False
 
         f_dim = self.trunk.fused_dim  # typically 320D
+        scalar_dim = 8  # Direct uncompressed scalars: [HP, Gold, Level, Streak, Stage, Round, Unit Count, Item Count]
+        in_features = f_dim + scalar_dim
 
         # 1. Placement Regression Head: E[Placement] ∈ [1.0, 8.0]
         self.placement_head = nn.Sequential(
-            nn.Linear(f_dim, hidden_dim),
+            nn.Linear(in_features, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.GELU(),
             nn.Dropout(dropout),
@@ -56,7 +58,7 @@ class BoardQualityNet(nn.Module):
 
         # 2. Top-4 Classification Head: Binary Cross-Entropy / Logits
         self.top4_head = nn.Sequential(
-            nn.Linear(f_dim, hidden_dim // 2),
+            nn.Linear(in_features, hidden_dim // 2),
             nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim // 2, 2),
@@ -72,6 +74,10 @@ class BoardQualityNet(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute placement prediction and Top-4 classification logits.
 
+        Combines the deep board representation from the Multi-Modal Trunk with
+        direct, uncompressed skip-connections of the focal player's current health,
+        gold, stage, and level.
+
         Returns:
             tuple[torch.Tensor, torch.Tensor]:
                 - placement_pred: (B, 1) expected placement in [1.0, 8.0]
@@ -86,18 +92,23 @@ class BoardQualityNet(nn.Module):
 
         if state_scalars is not None:
             state_feat = self.trunk.state_mlp(state_scalars)
+            scalars_direct = state_scalars
         else:
             state_feat = torch.zeros(
                 board_feat.shape[0], self.trunk.state_feat_dim, device=board_feat.device
             )
+            scalars_direct = torch.zeros(board_feat.shape[0], 8, device=board_feat.device)
 
         fused = self.trunk.fusion(torch.cat([board_feat, state_feat], dim=-1))
 
-        raw_place = self.placement_head(fused)
+        # Direct skip-connection: fused representation + raw focal state scalars
+        combined = torch.cat([fused, scalars_direct], dim=-1)
+
+        raw_place = self.placement_head(combined)
         # Bounded between 1.0 (1st place) and 8.0 (8th place)
         placement_pred = 1.0 + 7.0 * torch.sigmoid(raw_place)
 
-        top4_logits = self.top4_head(fused)
+        top4_logits = self.top4_head(combined)
 
         return placement_pred, top4_logits
 
