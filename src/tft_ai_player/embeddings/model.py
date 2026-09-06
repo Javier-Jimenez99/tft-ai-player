@@ -30,11 +30,61 @@ def build_hex_geodesic_distance_matrix() -> torch.Tensor:
     return torch.clamp(dist_matrix, 0.0, 8.0)
 
 
+class StarWeight(torch.Tensor):
+    """Tensor proxy for cumulative star embedding weights that maps .grad to the underlying leaf delta."""
+
+    @staticmethod
+    def __new__(cls, data: torch.Tensor, leaf: torch.Tensor):
+        t = torch.Tensor._make_subclass(cls, data)
+        t._leaf = leaf
+        return t
+
+    @property
+    def grad(self) -> torch.Tensor | None:
+        return self._leaf.grad
+
+
+class OrdinalStarEmbedding(nn.Module):
+    """Ordinal / Cumulative Star Embedding module: v(s) = sum_{k=1}^s delta_k.
+
+    Provides a natural progressive upgrade manifold where higher stars build
+    additively upon previous star representations:
+    1* -> delta_1
+    2* -> delta_1 + delta_2
+    3* -> delta_1 + delta_2 + delta_3
+    Star 0 represents empty hex / padding (vector 0).
+    """
+
+    def __init__(self, num_stars: int = 5, embed_dim: int = 8) -> None:
+        super().__init__()
+        self.num_stars = num_stars
+        self.embed_dim = embed_dim
+        self.delta = nn.Embedding(num_stars, embed_dim, padding_idx=0)
+        nn.init.normal_(self.delta.weight, mean=0.0, std=0.5)
+        with torch.no_grad():
+            self.delta.weight[0].fill_(0.0)
+
+    @property
+    def weight(self) -> torch.Tensor:
+        cumsum_w = torch.cumsum(self.delta.weight, dim=0)
+        return StarWeight(cumsum_w, self.delta.weight)
+
+    @property
+    def embedding_dim(self) -> int:
+        return self.embed_dim
+
+    def forward(self, star_levels: torch.Tensor) -> torch.Tensor:
+        safe_stars = torch.clamp(star_levels.long(), 0, self.num_stars - 1)
+        table = torch.cumsum(self.delta.weight, dim=0)
+        return F.embedding(safe_stars, table)
+
+
 class Champ2Vec(nn.Module):
     """Permutation-Invariant Bag-of-Items Champion Token Embedding.
 
-    Embeds champion ID (32D), star level (8D), and sum-pools equipped items (16D).
+    Embeds champion ID (32D), ordinal star level (8D), and sum-pools equipped items (32D).
     Safely clamped to prevent CUDA device-side assertion failures.
+    Operates on full directional manifold with smooth activations (no terminal ReLU).
     """
 
     def __init__(
@@ -43,7 +93,7 @@ class Champ2Vec(nn.Module):
         num_items: int = 300,
         champ_dim: int = 32,
         star_dim: int = 8,
-        item_dim: int = 16,
+        item_dim: int = 32,
         out_dim: int = 32,
     ) -> None:
         super().__init__()
@@ -52,14 +102,15 @@ class Champ2Vec(nn.Module):
         self.out_dim = out_dim
 
         self.champ_embed = nn.Embedding(self.num_champs + 1, champ_dim, padding_idx=0)
-        self.star_embed = nn.Embedding(5, star_dim, padding_idx=0)
+        self.star_embed = OrdinalStarEmbedding(5, star_dim)
         self.item_embed = nn.Embedding(self.num_items + 1, item_dim, padding_idx=0)
 
-        fusion_in = champ_dim + star_dim + item_dim  # 32 + 8 + 16 = 56
+        fusion_in = champ_dim + star_dim + item_dim  # 32 + 8 + 32 = 72
         self.net = nn.Sequential(
             nn.Linear(fusion_in, out_dim),
             nn.LayerNorm(out_dim),
-            nn.ReLU(),
+            nn.GELU(),
+            nn.Linear(out_dim, out_dim),
         )
 
     def forward(
@@ -73,8 +124,7 @@ class Champ2Vec(nn.Module):
         c_vec = self.champ_embed(safe_champ_ids)
 
         if star_levels is not None:
-            safe_stars = torch.clamp(star_levels.long(), 0, 4)
-            s_vec = self.star_embed(safe_stars)
+            s_vec = self.star_embed(star_levels)
         else:
             s_vec = torch.zeros(*champ_ids.shape, self.star_embed.embedding_dim, device=champ_ids.device)
 
@@ -88,7 +138,7 @@ class Champ2Vec(nn.Module):
         combined = torch.cat([c_vec, s_vec, i_sum], dim=-1)
         unit_vec = self.net(combined)
 
-        # Zero-out empty hexes
+        # Zero-out empty hexes strictly
         is_occupied = (safe_champ_ids > 0).unsqueeze(-1).float()
         return unit_vec * is_occupied
 
@@ -102,7 +152,8 @@ class TraitEncoder(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(self.num_traits, out_dim),
             nn.LayerNorm(out_dim),
-            nn.ReLU(),
+            nn.GELU(),
+            nn.Linear(out_dim, out_dim),
         )
 
     def forward(self, trait_vec: torch.Tensor) -> torch.Tensor:
@@ -153,9 +204,10 @@ class HexTransformerBlock(nn.Module):
 class BoardHexTransformer(nn.Module):
     """Clean, Stable Transformer Encoder for the 28-Hex TFT Board.
 
-    - Uses standard, highly optimized PyTorch TransformerEncoder layers (zero custom index bugs).
-    - Masked Mean Pooling over active units.
+    - Uses standard, highly optimized PyTorch TransformerEncoder layers with GELU activations.
+    - Attention-weighted and masked mean pooling over active units to preserve carry itemization signals.
     - Fuses active trait synergy activations into a 256D board feature.
+    - Full directional manifold (no terminal ReLU).
     """
 
     def __init__(
@@ -183,17 +235,24 @@ class BoardHexTransformer(nn.Module):
             nhead=num_heads,
             dim_feedforward=embed_dim * 2,
             dropout=dropout,
-            activation="relu",
+            activation="gelu",
             batch_first=True,
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers, enable_nested_tensor=False)
+
+        self.pool_gate = nn.Sequential(
+            nn.Linear(embed_dim, 32),
+            nn.GELU(),
+            nn.Linear(32, 1),
+        )
 
         self.trait_encoder = TraitEncoder(num_traits=num_traits, out_dim=64)
         self.fusion = nn.Sequential(
             nn.Linear(embed_dim + 64, out_dim),
             nn.LayerNorm(out_dim),
             nn.Dropout(dropout),
-            nn.ReLU(),
+            nn.GELU(),
+            nn.Linear(out_dim, out_dim),
         )
 
     def forward(
@@ -217,6 +276,7 @@ class BoardHexTransformer(nn.Module):
                 key_padding_mask = key_padding_mask & ~all_masked
             occupancy_mask = (flat_ids > 0).unsqueeze(-1).float()
         else:
+            flat_ids = None
             key_padding_mask = None
             occupancy_mask = torch.ones(batch_size, 28, 1, device=board_tokens.device)
 
@@ -226,11 +286,20 @@ class BoardHexTransformer(nn.Module):
         # 2. Standard PyTorch Transformer Encoder
         x = self.transformer(x, src_key_padding_mask=key_padding_mask)
 
-
-        # 3. Masked Mean Pooling over active units
+        # 3. Masked Attention-Weighted & Mean Pooling over active units
         masked_tokens = x * occupancy_mask
         unit_counts = occupancy_mask.sum(dim=1).clamp(min=1.0)
-        board_spatial = masked_tokens.sum(dim=1) / unit_counts  # (Batch, 128)
+        mean_spatial = masked_tokens.sum(dim=1) / unit_counts  # (Batch, 128)
+
+        attn_logits = self.pool_gate(x)  # (Batch, 28, 1)
+        if flat_ids is not None:
+            masked_logits = attn_logits.masked_fill((flat_ids == 0).unsqueeze(-1), -1e4)
+            attn_weights = F.softmax(masked_logits, dim=1)
+        else:
+            attn_weights = F.softmax(attn_logits, dim=1)
+        weighted_spatial = (x * attn_weights).sum(dim=1)  # (Batch, 128)
+
+        board_spatial = 0.5 * weighted_spatial + 0.5 * mean_spatial
 
         # 4. Trait Synergy Fusion
         if trait_vec is not None:
@@ -255,7 +324,8 @@ class StateMLP(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(in_features, out_dim),
             nn.LayerNorm(out_dim),
-            nn.ReLU(),
+            nn.GELU(),
+            nn.Linear(out_dim, out_dim),
         )
 
     def forward(self, state_scalars: torch.Tensor) -> torch.Tensor:
@@ -318,7 +388,7 @@ class MultiModalFusionTrunk(nn.Module):
             nn.Linear(in_fused, fused_dim),
             nn.LayerNorm(fused_dim),
             nn.Dropout(dropout),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(fused_dim, fused_dim),
         )
 
@@ -467,21 +537,21 @@ class TrunkPretrainModel(nn.Module):
         # Objective 1: Macro (Top-4 vs Bot-4 Classification)
         self.value_head = nn.Sequential(
             nn.Linear(f_dim, 64),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(64, num_classes),
         )
 
         # Objective 2: Micro (PVP Combat Round Win Logit)
         self.combat_head = nn.Sequential(
             nn.Linear(f_dim, 64),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(64, 1),
         )
 
         # Objective 3: Flow (InfoNCE Projection from ISOLATED board feature)
         self.contrast_head = nn.Sequential(
             nn.Linear(b_dim, 128),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(128, proj_dim),
         )
 

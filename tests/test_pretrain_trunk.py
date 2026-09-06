@@ -49,7 +49,8 @@ def test_champion_item_and_trait_vocabularies() -> None:
     idx1 = vocab.add_champion("DA_18_Cassiopeia")
     assert idx1 > 0
     assert vocab.encode("DA_18_Cassiopeia") == idx1
-    assert vocab.decode(idx1) == "DA_18_Cassiopeia"
+    assert vocab.encode("TFT18_Cassiopeia") == idx1
+    assert vocab.decode(idx1) in ("DA_18_Cassiopeia", "TFT18_Cassiopeia")
 
     assert len(item_vocab) > 1
     assert item_vocab.encode("<NO_ITEM>") == 0

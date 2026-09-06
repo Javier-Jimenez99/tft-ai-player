@@ -137,6 +137,24 @@ def test_consumable_remover(player: Player):
     assert "TFT_Item_Bloodthirster" in bench_ids
 
 
+def test_consumable_remover_preserves_items_when_item_bench_is_full(player: Player):
+    """A Magnetic Remover must not consume itself or delete items on overflow."""
+    unit = ChampionInstance(
+        champion_id="TFT18_Akali",
+        cost=1,
+        star_level=2,
+        items=["TFT_Item_InfinityEdge"],
+    )
+    player.board[(0, 1)] = unit
+    player.removers = 1
+    for _ in range(player.set_data.max_item_bench):
+        assert player.add_item("TFT_Item_BFSword")
+
+    assert not player.use_remover(is_board=True, loc=(0, 1))
+    assert player.removers == 1
+    assert unit.items == ["TFT_Item_InfinityEdge"]
+
+
 def test_consumable_reforger(player: Player, set18_data: SetData):
     """Test that Reforger rerolls an item on the bench into another random one."""
     player.add_item("TFT_Item_BFSword")

@@ -257,3 +257,94 @@ def test_cli_cluster_compositions(tmp_path: Path) -> None:
     assert (tmp_path / "cli_clustering" / "z_index.pt").exists()
     assert (tmp_path / "cli_clustering" / "cluster_profiles.json").exists()
     assert (tmp_path / "cli_clustering" / "figures" / "pca_latent_clusters.png").exists()
+
+
+def test_archetype_intra_vs_inter_cluster_distance() -> None:
+    """Verify that boards of the same composition archetype have significantly higher cosine similarity than boards of distinct archetypes."""
+    import torch.nn.functional as F
+
+    boards, vocab, item_vocab, trait_vocab = create_synthetic_endgame_dataset(num_samples=40, seed=42)
+    trunk = MultiModalFusionTrunk(
+        num_champs=len(vocab),
+        num_items=len(item_vocab),
+        num_traits=len(trait_vocab),
+        board_feat_dim=256,
+    )
+
+    latents, _ = extract_board_latents(trunk, boards, device="cpu")
+    # Normalize latents to unit sphere
+    normed = F.normalize(latents, p=2, dim=-1)
+
+    # In create_synthetic_endgame_dataset, boards are generated cyclically from 5 archetypes:
+    # board i and board i+5 belong to the same archetype!
+    intra_sims = []
+    inter_sims = []
+
+    for i in range(len(boards)):
+        for j in range(i + 1, len(boards)):
+            sim = float((normed[i] @ normed[j]).item())
+            if (i % 5) == (j % 5):
+                intra_sims.append(sim)
+            else:
+                inter_sims.append(sim)
+
+    mean_intra = float(np.mean(intra_sims))
+    mean_inter = float(np.mean(inter_sims))
+
+    # Intra-cluster boards share unit tokens, items, and trait vectors,
+    # so their cosine similarity must be higher than cross-archetype boards
+    assert mean_intra > mean_inter, f"Expected intra ({mean_intra:.4f}) > inter ({mean_inter:.4f})"
+
+
+def test_new_trunk_latent_dimension_and_norm_stability() -> None:
+    """Verify extract_board_latents outputs stable 256D vectors with valid norms."""
+    boards, vocab, item_vocab, trait_vocab = create_synthetic_endgame_dataset(num_samples=20, seed=123)
+    trunk = MultiModalFusionTrunk(
+        num_champs=len(vocab),
+        num_items=len(item_vocab),
+        num_traits=len(trait_vocab),
+        board_feat_dim=256,
+    )
+
+    latents, _ = extract_board_latents(trunk, boards, batch_size=10, device="cpu")
+
+    assert latents.shape == (20, 256)
+    assert not torch.isnan(latents).any()
+    assert not torch.isinf(latents).any()
+
+    norms = latents.norm(dim=-1)
+    assert (norms > 0.05).all(), f"Min norm {norms.min().item():.4f} too small (degenerate latents)"
+
+
+def test_z_index_cluster_orthogonality_and_coverage() -> None:
+    """Verify cluster centroids have non-trivial angular separation and no cluster collapses."""
+    import torch.nn.functional as F
+
+    boards, vocab, item_vocab, trait_vocab = create_synthetic_endgame_dataset(num_samples=50, seed=42)
+    trunk = MultiModalFusionTrunk(
+        num_champs=len(vocab),
+        num_items=len(item_vocab),
+        num_traits=len(trait_vocab),
+        board_feat_dim=256,
+    )
+
+    latents, _ = extract_board_latents(trunk, boards, device="cpu")
+    clusterer = CompositionClusterer(n_clusters=5, random_state=42)
+    clusterer.fit(latents, boards)
+
+    centroids = clusterer.centroids
+    assert centroids.shape == (5, 256)
+
+    # Check all clusters are populated
+    unique_labels = set(clusterer.labels_)
+    assert len(unique_labels) == 5, f"Expected 5 non-empty clusters, got {len(unique_labels)}"
+
+    # Check centroid angular separation
+    normed_c = F.normalize(centroids, p=2, dim=-1)
+    sim_matrix = (normed_c @ normed_c.T).numpy()
+
+    for i in range(5):
+        for j in range(i + 1, 5):
+            sim = sim_matrix[i, j]
+            assert sim < 0.95, f"Centroids {i} and {j} too collinear: cos_sim={sim:.4f}"
+

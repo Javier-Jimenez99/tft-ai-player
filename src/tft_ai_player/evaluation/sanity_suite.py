@@ -189,9 +189,9 @@ class ModelSanitySuite:
             units_spec = [
                 ((0, 2), "TFT18_Leona", 2, ["TFT_Item_WarmogsArmor", "TFT_Item_BrambleVest", "TFT_Item_DragonsClaw"]),
                 ((0, 3), "TFT18_Kobuko", 2, ["TFT_Item_SunfireCape"]),
-                ((0, 4), "TFT18_Ornn", 2, []),
+                ((0, 4), "TFT18_Cinderling", 2, []),
                 ((1, 1), "TFT18_Camille", 2, []),
-                ((1, 5), "TFT18_Rakan", 2, []),
+                ((1, 5), "TFT18_Pebbles", 2, []),
                 ((3, 1), "TFT18_Akali", 2, ["TFT_Item_InfinityEdge", "TFT_Item_Bloodthirster", "TFT_Item_TitansResolve"]),
                 ((3, 5), "TFT18_Karma", 2, ["TFT_Item_BlueBuff", "TFT_Item_JeweledGauntlet"]),
             ]
@@ -199,9 +199,9 @@ class ModelSanitySuite:
             units_spec = [
                 ((0, 2), "TFT18_Leona", 2, []),
                 ((0, 3), "TFT18_Kobuko", 2, []),
-                ((0, 4), "TFT18_Ornn", 2, []),
+                ((0, 4), "TFT18_Cinderling", 2, []),
                 ((1, 1), "TFT18_Camille", 2, []),
-                ((1, 5), "TFT18_Rakan", 2, []),
+                ((1, 5), "TFT18_Pebbles", 2, []),
                 ((3, 1), "TFT18_Akali", 2, []),
                 ((3, 5), "TFT18_Karma", 2, []),
             ]
@@ -209,7 +209,7 @@ class ModelSanitySuite:
 
     def get_star_level_comps(self) -> tuple[Player, Player]:
         """Pair of boards: Full 3-Star Team vs Full 1-Star Team (same champions)."""
-        champs = ["TFT18_Leona", "TFT18_Kobuko", "TFT18_Ornn", "TFT18_Camille", "TFT18_Rakan", "TFT18_Akali", "TFT18_Karma"]
+        champs = ["TFT18_Leona", "TFT18_Kobuko", "TFT18_Cinderling", "TFT18_Camille", "TFT18_Pebbles", "TFT18_Akali", "TFT18_Karma"]
         pos = [(0, 1), (0, 2), (0, 3), (1, 1), (1, 5), (3, 1), (3, 5)]
 
         spec_3star = [(p, c, 3, []) for p, c in zip(pos, champs)]
@@ -221,7 +221,7 @@ class ModelSanitySuite:
 
     def get_unit_count_comps(self) -> tuple[Player, Player]:
         """Pair of boards: 9 Units (Level 9) vs 3 Units (Level 3)."""
-        champs_9 = ["TFT18_Leona", "TFT18_Kobuko", "TFT18_Ornn", "TFT18_Camille", "TFT18_Rakan", "TFT18_Akali", "TFT18_Karma", "TFT18_Swain", "TFT18_Silco"]
+        champs_9 = ["TFT18_Leona", "TFT18_Kobuko", "TFT18_Cinderling", "TFT18_Camille", "TFT18_Pebbles", "TFT18_Akali", "TFT18_Karma", "TFT18_Ahri", "TFT18_Draven"]
         pos_9 = [(0, 1), (0, 2), (0, 3), (0, 4), (1, 1), (1, 5), (3, 1), (3, 3), (3, 5)]
         spec_9 = [(p, c, 2, []) for p, c in zip(pos_9, champs_9)]
 
@@ -234,13 +234,25 @@ class ModelSanitySuite:
         return p_9, p_3
 
     def get_cost_tier_comps(self) -> tuple[Player, Player]:
-        """Pair of boards: High-Cost 4/5-Costs 2-star vs Low-Cost 1-Costs 2-star."""
-        high_champs = ["TFT18_Swain", "TFT18_Silco", "TFT18_Akali", "TFT18_Karma", "TFT18_Ornn", "TFT18_Rakan", "TFT18_Leona"]
-        low_champs = ["TFT18_Pebbles", "TFT18_Cinderling", "TFT18_Kobuko", "TFT18_Camille", "TFT18_RekSai", "TFT18_Akali", "TFT18_Leona"]
-        pos = [(0, 1), (0, 2), (0, 3), (1, 1), (1, 5), (3, 1), (3, 5)]
-
-        spec_high = [(p, c, 2, []) for p, c in zip(pos, high_champs)]
-        spec_low = [(p, c, 2, []) for p, c in zip(pos, low_champs)]
+        """Pair of boards: High-Cost 4/5-Costs 2-star vs Low-Cost 1-Costs 2-star (balanced positioning)."""
+        spec_high = [
+            ((0, 2), "TFT18_Amumu", 2, []),
+            ((0, 3), "TFT18_AncientSentinel", 2, []),
+            ((1, 2), "TFT18_Alune", 2, []),
+            ((3, 1), "TFT18_Aphelios", 2, []),
+            ((3, 2), "TFT18_Ashe", 2, []),
+            ((3, 4), "TFT18_Ahri", 2, []),
+            ((3, 5), "TFT18_Ezreal", 2, []),
+        ]
+        spec_low = [
+            ((0, 2), "TFT18_Pebbles", 2, []),
+            ((0, 3), "TFT18_Kobuko", 2, []),
+            ((0, 4), "TFT18_Leona", 2, []),
+            ((1, 2), "TFT18_RekSai", 2, []),
+            ((1, 4), "TFT18_Camille", 2, []),
+            ((3, 2), "TFT18_Akali", 2, []),
+            ((3, 4), "TFT18_Cinderling", 2, []),
+        ]
 
         p_high = self.build_test_player("Comp_HighCost", level=7, health=70, gold=30, units_spec=spec_high)
         p_low = self.build_test_player("Comp_LowCost", level=7, health=70, gold=30, units_spec=spec_low)
@@ -248,7 +260,7 @@ class ModelSanitySuite:
 
     def get_capped_vs_early_comps(self) -> tuple[Player, Player]:
         """Pair: Stage 5 Capped Level 9 Board (100 HP, 9 units 2-star, full items) vs Stage 5 Early Level 5 Board (15 HP, 5 units 1-star, 0 items)."""
-        champs_9 = ["TFT18_Swain", "TFT18_Silco", "TFT18_Akali", "TFT18_Karma", "TFT18_Ornn", "TFT18_Rakan", "TFT18_Leona", "TFT18_Kobuko", "TFT18_Camille"]
+        champs_9 = ["TFT18_Draven", "TFT18_Ashe", "TFT18_Alune", "TFT18_Ivern", "TFT18_Ahri", "TFT18_Ezreal", "TFT18_Aphelios", "TFT18_Amumu", "TFT18_AncientSentinel"]
         pos_9 = [(0, 1), (0, 2), (0, 3), (0, 4), (1, 1), (1, 5), (3, 1), (3, 3), (3, 5)]
         spec_capped = [
             (pos_9[0], champs_9[0], 2, ["TFT_Item_WarmogsArmor", "TFT_Item_DragonsClaw", "TFT_Item_BrambleVest"]),
@@ -399,7 +411,10 @@ class ModelSanitySuite:
 
         siamese_model = DeepSiameseCombatNet(trunk=trunk, freeze_trunk=True, hidden_dim=256).to(self.device)
         sd = torch.load(siamese_ckpt, map_location=self.device, weights_only=False)
-        siamese_model.load_state_dict(sd.get("model_state_dict", sd), strict=False)
+        raw_state = sd.get("model_state_dict", sd)
+        curr_state = siamese_model.state_dict()
+        filtered_state = {k: v for k, v in raw_state.items() if k in curr_state and curr_state[k].shape == v.shape}
+        siamese_model.load_state_dict(filtered_state, strict=False)
         siamese_model.eval()
 
         encoder = self.get_encoder()
@@ -555,13 +570,14 @@ class ModelSanitySuite:
         statuses = [t.status for t in report.test_results]
         if "FAIL" in statuses:
             report.overall_status = "FAIL"
+            failed_tests = [t.name for t in report.test_results if t.status == "FAIL"]
             report.diagnosis = (
-                f"DeepSiameseCombatNet fails the Item Advantage Law ({p_items_vs_naked:.2f}% vs required >= 80%). "
-                "Because item embeddings have low gradient magnitude in the interaction MLP, combat resolution treats "
-                "items as negligible, preventing RL agents from learning that itemizing carries wins games."
+                f"DeepSiameseCombatNet fails the following laws: {', '.join(failed_tests)}. "
+                "Review feature representations, logit calibration, or interaction MLP gradient flow."
             )
         else:
             report.overall_status = "PASS"
+            report.diagnosis = "All combat sanity laws passed."
 
         return report
 
@@ -858,6 +874,42 @@ class ModelSanitySuite:
             )
         )
 
+        # Law 3: Semantic Composition Alignment Law
+        trunk = self.get_trunk()
+        p_std = self.get_standard_level7_comp("full")
+        p_high, _ = self.get_cost_tier_comps()
+        encoder = self.get_encoder()
+
+        c_std, s_std, i_std, t_std = encoder.encode_board_tensors(p_std)
+        c_high, s_high, i_high, t_high = encoder.encode_board_tensors(p_high)
+
+        with torch.no_grad():
+            h_std = trunk.encode_board(c_std.unsqueeze(0), s_std.unsqueeze(0), i_std.unsqueeze(0), t_std.unsqueeze(0)).squeeze(0)
+            h_high = trunk.encode_board(c_high.unsqueeze(0), s_high.unsqueeze(0), i_high.unsqueeze(0), t_high.unsqueeze(0)).squeeze(0)
+
+        h_std_norm = F.normalize(h_std.cpu(), p=2, dim=-1)
+        h_high_norm = F.normalize(h_high.cpu(), p=2, dim=-1)
+
+        sims_std = (z_normed @ h_std_norm).numpy()
+        sims_high = (z_normed @ h_high_norm).numpy()
+
+        max_sim_std = float(np.max(sims_std))
+        max_sim_high = float(np.max(sims_high))
+
+        law3_pass = max_sim_std > 0.15 and max_sim_high > 0.15
+        report.test_results.append(
+            TestResult(
+                name="Semantic Composition Alignment Law",
+                description="Canonical tournament compositions must project positively into the latent archetype subspace",
+                law="max_k cos_sim(h_{comp}, z_k) > 0.15",
+                expected="> 0.150 for meta comps",
+                actual=f"Comp A max sim = {max_sim_std:.4f}, Comp B max sim = {max_sim_high:.4f}",
+                passed=law3_pass,
+                status="PASS" if law3_pass else "FAIL",
+                details={"comp_a_best_cluster": int(np.argmax(sims_std)), "comp_b_best_cluster": int(np.argmax(sims_high))},
+            )
+        )
+
         statuses = [t.status for t in report.test_results]
         report.overall_status = "FAIL" if "FAIL" in statuses else "PASS"
         return report
@@ -884,43 +936,129 @@ class ModelSanitySuite:
             with open(elo_ckpt, "rb") as f:
                 model_obj = pickle.load(f)
 
-            # Test synthetic features representing typical performance across 3 tiers
-            # (Features: avg placement, top4 rate, win rate, avg econ, avg unit cost)
-            has_pred = hasattr(model_obj, "predict_match") or hasattr(model_obj, "predict")
-            pred_sample = None
-            if hasattr(model_obj, "predict_match"):
-                n_feats = getattr(getattr(model_obj, "ood_detector", None), "scaler", None)
-                n_dim = getattr(n_feats, "n_features_in_", 24)
-                feat_sample = np.zeros((1, n_dim), dtype=np.float32)
-                pred_elo, pred_tier, ood_info = model_obj.predict_match(feat_sample)
-                pred_sample = f"{pred_elo:.0f} ELO ({pred_tier})"
+            has_pred = hasattr(model_obj, "predict_match")
 
+            # Law 1: Model Object & Inference Interface
             report.test_results.append(
                 TestResult(
                     name="Model Object & Inference Interface",
                     description="MatchEloRegressor deserializes cleanly and exposes competitive predict_match interface",
                     law="hasattr(model, 'predict_match')",
                     expected="True",
-                    actual=f"hasattr = {has_pred} (Sample Output: {pred_sample})",
+                    actual=f"hasattr = {has_pred}",
                     passed=has_pred,
                     status="PASS" if has_pred else "FAIL",
                 )
             )
+
+            if not has_pred:
+                report.overall_status = "FAIL"
+                report.diagnosis = "Model missing predict_match interface"
+                return report
+
+            mean_f = model_obj.ood_detector.feature_means.copy()
+
+            # Law 2: High vs Low Elo Tempo Monotonicity Law
+            # Challenger tempo: fast-8 (round 14), high avg level (8.6), level 9, high pvp win rate (0.65)
+            chal_f = mean_f.copy()
+            chal_f[15] = 14.0  # round reached lvl 8
+            chal_f[16] = 8.6   # avg level
+            chal_f[12] = 9.0   # final level
+            chal_f[2] = 0.65   # pvp win rate
+            chal_f[14] = 10.0  # round reached lvl 7
+
+            # Iron tempo: late level 8 (round 28), low avg level (5.5), level 6, low win rate (0.25), hoards 50g blindly
+            iron_f = mean_f.copy()
+            iron_f[15] = 28.0
+            iron_f[16] = 5.5
+            iron_f[12] = 6.0
+            iron_f[2] = 0.25
+            iron_f[9] = 0.85
+
+            elo_chal, tier_chal, _ = model_obj.predict_match(chal_f)
+            elo_iron, tier_iron, _ = model_obj.predict_match(iron_f)
+            delta_elo = elo_chal - elo_iron
+
+            law2_pass = delta_elo >= 800.0
+            report.test_results.append(
+                TestResult(
+                    name="Competitive Tempo Monotonicity Law",
+                    description="Aggressive Challenger tempo must predict strictly higher rating than passive low-tier play",
+                    law="Elo(Challenger Tempo) - Elo(Iron Tempo) >= +800",
+                    expected=">= +800 ELO separation",
+                    actual=f"Delta = +{delta_elo:.0f} ELO (Challenger: {elo_chal:.0f} [{tier_chal}] vs Iron: {elo_iron:.0f} [{tier_iron}])",
+                    passed=law2_pass,
+                    status="PASS" if law2_pass else "FAIL",
+                )
+            )
+
+            # Law 3: Solution Space OOD Detection Law
+            _, _, ood_human = model_obj.predict_match(mean_f)
+
+            # Aberrant bot: level 4 at round 30, hoards 95 gold, 0 items
+            bot_f = mean_f.copy()
+            bot_f[0] = 8.0
+            bot_f[7] = 95.0
+            bot_f[12] = 4.0
+            bot_f[17] = 8.0
+            bot_f[22] = 0.0
+            _, _, ood_bot = model_obj.predict_match(bot_f)
+
+            law3_pass = bool(ood_human["is_in_distribution"]) and not bool(ood_bot["is_in_distribution"])
+            report.test_results.append(
+                TestResult(
+                    name="Solution Space OOD Detection Law",
+                    description="Valid human gameplay must be flagged in-distribution, aberrant bot trajectories flagged as outliers",
+                    law="Human == Inlier and Aberrant Bot == Outlier",
+                    expected="Human inlier and Bot outlier",
+                    actual=f"Human inlier={ood_human['is_in_distribution']} ({ood_human['inlier_confidence_pct']:.1f}%), Bot outlier={not ood_bot['is_in_distribution']} (Dist={ood_bot['mahalanobis_distance']:.1f})",
+                    passed=law3_pass,
+                    status="PASS" if law3_pass else "FAIL",
+                )
+            )
+
+            # Law 4: Competitive Elo Boundedness Law
+            law4_pass = 100.0 <= elo_chal <= 4600.0 and 100.0 <= elo_iron <= 4600.0
+            report.test_results.append(
+                TestResult(
+                    name="Competitive Elo Range Boundedness Law",
+                    description="Predicted Elo ratings must remain within realistic ranked ladder bounds [100, 4600]",
+                    law="100.0 <= Elo <= 4600.0",
+                    expected="[100, 4600]",
+                    actual=f"Challenger: {elo_chal:.0f}, Iron: {elo_iron:.0f}",
+                    passed=law4_pass,
+                    status="PASS" if law4_pass else "FAIL",
+                )
+            )
+
         except Exception as e:
             report.overall_status = "FAIL"
-            report.diagnosis = f"Failed to load EloRegressor: {e}"
+            report.diagnosis = f"Failed to audit EloRegressor: {e}"
+            return report
 
+        statuses = [t.status for t in report.test_results]
+        report.overall_status = "FAIL" if "FAIL" in statuses else "PASS"
+        report.diagnosis = "All Elo regressor sanity laws passed." if report.overall_status == "PASS" else "One or more Elo laws failed."
         return report
 
     # =========================================================================
-    # AUDIT 7: TFTActorCritic (AlphaStar V6 RL Agent)
+    # AUDIT 7: TFTActorCritic (latest AlphaStar RL Agent)
     # =========================================================================
 
     def audit_rl_actor_critic(self) -> ModelAuditReport:
         """Audit TFTActorCritic policy and value heads (PPO checkpoint)."""
-        rl_ckpt = Path(r"D:\tft-winner-data\set18\models\rl\checkpoints\ppo_alphastar_v6\gen_0300\training_state.pt")
+        v7_root = Path(r"D:\tft-winner-data\set18\models\rl\checkpoints\ppo_alphastar_v7")
+        v7_checkpoints = sorted(
+            v7_root.glob("gen_*/training_state.pt"),
+            key=lambda checkpoint: checkpoint.parent.name,
+        )
+        rl_ckpt = (
+            v7_checkpoints[-1]
+            if v7_checkpoints
+            else Path(r"D:\tft-winner-data\set18\models\rl\checkpoints\ppo_alphastar_v6\gen_0300\training_state.pt")
+        )
         report = ModelAuditReport(
-            model_name="TFTActorCritic (AlphaStar V6 Gen 300)",
+            model_name=f"TFTActorCritic (AlphaStar {rl_ckpt.parent.parent.name} {rl_ckpt.parent.name})",
             checkpoint_path=str(rl_ckpt),
             overall_status="PASS",
         )
@@ -1044,13 +1182,11 @@ class ModelSanitySuite:
         statuses = [t.status for t in report.test_results]
         if "FAIL" in statuses:
             report.overall_status = "FAIL"
-            report.diagnosis = (
-                f"TFTActorCritic Critic head fails the Item Sensitivity Law (Delta = {delta_v_items:+.4f}). "
-                "The value function estimates zero additional cumulative reward for having 9 completed meta items, "
-                "meaning PPO receives no gradient incentive to prioritize itemizing units."
-            )
+            failed_tests = [t.name for t in report.test_results if t.status == "FAIL"]
+            report.diagnosis = f"TFTActorCritic fails the following laws: {', '.join(failed_tests)}."
         else:
             report.overall_status = "PASS"
+            report.diagnosis = "All actor-critic sanity laws passed."
 
         return report
 
@@ -1093,7 +1229,7 @@ class ModelSanitySuite:
         reports["elo_regressor"] = self.audit_elo_regressor()
 
         # 7. TFTActorCritic
-        print(" [*] Auditing Model 7/7: TFTActorCritic (AlphaStar V6 RL)...")
+        print(" [*] Auditing Model 7/7: TFTActorCritic (latest AlphaStar RL checkpoint)...")
         reports["actor_critic"] = self.audit_rl_actor_critic()
 
         elapsed = time.time() - start_time

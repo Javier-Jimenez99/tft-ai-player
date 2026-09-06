@@ -126,6 +126,12 @@ def main() -> int:
     model_player.save(path_player)
     print(f" [+] Saved Player-Level Model: {path_player}")
 
+    backup_dir = Path("D:/tft-winner-data/set18/models/elo_predictor")
+    if backup_dir.exists():
+        model_match.save(backup_dir / "elo_regressor_match_level.pkl")
+        model_player.save(backup_dir / "elo_regressor_player_level.pkl")
+        print(f" [+] Saved backup copies to {backup_dir}")
+
     # 4. Feature Importance Analysis
     print("\n" + "-" * 80)
     print(" [TOP 8 FEATURE IMPORTANCES FOR PREDICTING TFT ELO]")

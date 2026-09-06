@@ -64,11 +64,12 @@ FEATURE_NAMES = [
 _DEFAULT_BOARD_EVALUATOR = None
 _DEFAULT_VOCAB = None
 _DEFAULT_ITEM_VOCAB = None
+_DEFAULT_TRAIT_VOCAB = None
 
 
 def get_default_board_evaluator():
     """Lazy-load cached default BoardQualityNet for fast neural feature extraction."""
-    global _DEFAULT_BOARD_EVALUATOR, _DEFAULT_VOCAB, _DEFAULT_ITEM_VOCAB
+    global _DEFAULT_BOARD_EVALUATOR, _DEFAULT_VOCAB, _DEFAULT_ITEM_VOCAB, _DEFAULT_TRAIT_VOCAB
     if _DEFAULT_BOARD_EVALUATOR is None:
         from pathlib import Path
         import torch
@@ -76,16 +77,17 @@ def get_default_board_evaluator():
         if ckpt.exists():
             try:
                 from tft_ai_player.board_evaluator.model import BoardQualityNet
-                from tft_ai_player.embeddings.vocab import ChampionVocabulary, ItemVocabulary
+                from tft_ai_player.embeddings.vocab import ChampionVocabulary, ItemVocabulary, TraitVocabulary
                 dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
                 _DEFAULT_BOARD_EVALUATOR = BoardQualityNet.load_checkpoint(ckpt, device=dev)
                 _DEFAULT_VOCAB = ChampionVocabulary()
                 _DEFAULT_ITEM_VOCAB = ItemVocabulary()
+                _DEFAULT_TRAIT_VOCAB = TraitVocabulary()
             except Exception:
                 _DEFAULT_BOARD_EVALUATOR = False
         else:
             _DEFAULT_BOARD_EVALUATOR = False
-    return _DEFAULT_BOARD_EVALUATOR, _DEFAULT_VOCAB, _DEFAULT_ITEM_VOCAB
+    return _DEFAULT_BOARD_EVALUATOR, _DEFAULT_VOCAB, _DEFAULT_ITEM_VOCAB, _DEFAULT_TRAIT_VOCAB
 
 
 def parse_stage_round_index(stage_str: str) -> int:
@@ -102,6 +104,7 @@ def extract_game_features(
     board_evaluator: Any | None = None,
     vocab: Any | None = None,
     item_vocab: Any | None = None,
+    trait_vocab: Any | None = None,
     use_neural: bool = True,
 ) -> np.ndarray:
     """Extract a dense 35-dimensional hybrid feature vector (25 macro + 10 neural quality metrics)."""
@@ -275,7 +278,11 @@ def extract_game_features(
 
     neural_feats = (
         extract_neural_metrics(
-            sorted_traj, board_evaluator=board_evaluator, vocab=vocab, item_vocab=item_vocab
+            sorted_traj,
+            board_evaluator=board_evaluator,
+            vocab=vocab,
+            item_vocab=item_vocab,
+            trait_vocab=trait_vocab,
         )
         if use_neural
         else [0.0] * 10
@@ -290,6 +297,7 @@ def extract_neural_metrics(
     board_evaluator: Any | None = None,
     vocab: Any | None = None,
     item_vocab: Any | None = None,
+    trait_vocab: Any | None = None,
 ) -> list[float]:
     """Extract 10 round-by-round neural quality metrics using BoardQualityNet."""
     if not trajectory:
@@ -298,13 +306,15 @@ def extract_neural_metrics(
     evaluator = board_evaluator
     v = vocab
     iv = item_vocab
+    tv = trait_vocab
 
     if evaluator is None:
-        def_eval, def_v, def_iv = get_default_board_evaluator()
+        def_eval, def_v, def_iv, def_tv = get_default_board_evaluator()
         if def_eval:
             evaluator = def_eval
             v = def_v
             iv = def_iv
+            tv = def_tv
 
     if not evaluator:
         return [0.0] * 10
@@ -342,10 +352,14 @@ def extract_neural_metrics(
             scalars[i, 6] = float(maj) / 8.0
             scalars[i, 7] = float(minr) / 7.0
 
+            champ_names_for_round: list[str] = []
             if v is not None:
                 for u in b:
                     if not isinstance(u, dict):
                         continue
+                    u_name = u.get("unit") or u.get("champion") or u.get("name")
+                    if u_name:
+                        champ_names_for_round.append(str(u_name))
                     loc = u.get("loc") or u.get("location") or 0
                     if isinstance(loc, str):
                         parsed = parse_loc_to_row_col(loc)
@@ -356,11 +370,15 @@ def extract_neural_metrics(
                         except (ValueError, TypeError):
                             hex_idx = 0
                     if 0 <= hex_idx < 28:
-                        champs[i, hex_idx] = v.encode(u.get("unit") or u.get("champion") or u.get("name"))
+                        champs[i, hex_idx] = v.encode(u_name)
                         stars[i, hex_idx] = int(u.get("tier") or u.get("star_level") or 1)
                         if iv is not None:
                             for it_idx, it_name in enumerate((u.get("items") or [])[:3]):
                                 items[i, hex_idx, it_idx] = iv.encode(it_name)
+
+            if tv is not None and champ_names_for_round:
+                t_vec = tv.compute_trait_vector(champ_names_for_round)
+                traits[i] = torch.as_tensor(t_vec, dtype=torch.float32, device=dev)
 
         with torch.no_grad():
             pred_place, logits_top4 = evaluator(champs, stars, items, traits, scalars)

@@ -9,7 +9,7 @@ Defines the canonical 111-action factorized discrete action space:
   - 17..44: SELL_BOARD (board hex 0..27)
   - 45..72: DEPLOY_UNIT (moves bench unit to board hex 0..27)
   - 73..100: MOVE_BOARD (swaps/moves unit to board hex 0..27)
-  - 101..110: EQUIP_ITEM (equips item from item slot 0..9 onto primary unit)
+    - 101..110: EQUIP_ITEM (equips item from item slot 0..9 onto primary unit)
 """
 
 from __future__ import annotations
@@ -119,14 +119,16 @@ def get_action_mask(player: Player, set_data: SetData) -> np.ndarray:
     # 4. SELL_BENCH (8..16)
     for bench_slot in range(min(9, len(player.bench))):
         action_id = 8 + bench_slot
-        if player.bench[bench_slot] is not None:
+        unit = player.bench[bench_slot]
+        if unit is not None and len(unit.items) <= player.free_item_slots:
             mask[action_id] = True
 
     # 5. SELL_BOARD (17..44)
     for hex_idx in range(28):
         action_id = 17 + hex_idx
         r, c = index_to_hex(hex_idx, set_data.board_cols)
-        if (r, c) in player.board:
+        unit = player.board.get((r, c))
+        if unit is not None and len(unit.items) <= player.free_item_slots:
             mask[action_id] = True
 
     # 6. DEPLOY_UNIT (45..72)

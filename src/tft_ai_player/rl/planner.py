@@ -288,16 +288,55 @@ class ShopBeamSearchPlanner:
                     for _ in range(units_deployed):
                         cand.actions.append(45)
 
-        # Phase 4: Beam Selection via Fast Heuristic Filter
+        # Phase 3.5: Branch item-to-unit assignments. Player.equip_item also crafts a
+        # completed item when the target already holds a compatible component.
         candidates.sort(key=lambda n: n.heuristic_score, reverse=True)
-        best_node = candidates[0] if candidates else root_node
+        candidates = candidates[: self.beam_width]
 
-        # Optional single-check neural verification if explicitly requested
-        if getattr(self, "use_neural_eval", False) and self.encoder is not None and best_node is not root_node:
-            best_n_score = self.evaluate_neural_score(best_node.player, stage, round_in_stage, target_z, s_hat_next)
-            root_n_score = self.evaluate_neural_score(root_node.player, stage, round_in_stage, target_z, s_hat_next)
-            if root_n_score > best_n_score:
-                best_node = root_node
+        # Consider a single legacy item action per turn. Its recipient follows the
+        # same priority rule as execute_action, so planning and execution agree.
+        base_candidates = list(candidates)
+        item_candidates: list[PlannerNode] = []
+        for cand in base_candidates[:2]:
+            for item_slot in range(min(10, len(cand.player.item_bench))):
+                p_item = cand.player.clone()
+                action_id = 101 + item_slot
+                if not execute_action(p_item, cand.pool.clone(), self.set_data, action_id):
+                    continue
+                item_candidates.append(
+                    PlannerNode(
+                        player=p_item,
+                        pool=cand.pool.clone(),
+                        actions=list(cand.actions) + [action_id],
+                        heuristic_score=self.compute_fast_heuristic(p_item),
+                    )
+                )
+
+        # Always retain item leaves in the V shortlist. The fast heuristic is
+        # intentionally item-agnostic, so it must not be allowed to erase them.
+        if item_candidates:
+            item_candidates.sort(key=lambda n: n.heuristic_score, reverse=True)
+            item_candidates = item_candidates[:4]
+            if getattr(self, "use_neural_eval", False) and self.encoder is not None:
+                for cand in item_candidates:
+                    cand.neural_score = self.evaluate_neural_score(
+                        cand.player, stage, round_in_stage, target_z, s_hat_next
+                    )
+                item_candidates.sort(key=lambda n: n.neural_score, reverse=True)
+            candidates = base_candidates[: self.beam_width - 1] + item_candidates[:1]
+
+        # Phase 4: Compare the best fast candidate against the best item leaf
+        # through V. This replaces the previous all-leaf neural evaluation.
+        candidates.sort(key=lambda n: n.heuristic_score, reverse=True)
+        best_fast_node = candidates[0] if candidates else root_node
+        best_node = best_fast_node
+        if getattr(self, "use_neural_eval", False) and self.encoder is not None:
+            best_node.neural_score = self.evaluate_neural_score(
+                best_node.player, stage, round_in_stage, target_z, s_hat_next
+            )
+            for cand in candidates:
+                if cand.actions and cand.actions[-1] >= 101 and cand.neural_score > best_node.neural_score:
+                    best_node = cand
 
         # Phase 6: Reroll Check (Action 6)
         final_actions = list(best_node.actions)

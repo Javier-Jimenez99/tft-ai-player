@@ -33,14 +33,45 @@ class ChampionVocabulary:
         except Exception:
             pass
 
+    @staticmethod
+    def normalize_name(name: str) -> str:
+        """Resolve raw Riot/MetaTFT strings (e.g. DA_18_Cassiopeia, DA_Vi18) to canonical IDs."""
+        if not name or name == "<EMPTY>":
+            return "<EMPTY>"
+        cleaned = name.strip()
+        try:
+            from tft_ai_player.simulation.sets.set18 import SET18_CHAMPION_CATALOG
+            catalog_champs = {c.champion_id: c for c in SET18_CHAMPION_CATALOG}
+            if cleaned in catalog_champs:
+                return cleaned
+            base = re.sub(r"^(DA_18_|DA_|TFT18_)", "", cleaned, flags=re.IGNORECASE)
+            base = re.sub(r"(18|_AP|_Small|_small)$", "", base)
+            candidates = [
+                f"TFT18_{base}",
+                base,
+            ]
+            for c in candidates:
+                if c in catalog_champs:
+                    return c
+            clean_lower = base.lower()
+            for cid, cobj in catalog_champs.items():
+                if cobj.name.lower() == clean_lower or cid.lower() == f"tft18_{clean_lower}":
+                    return cid
+        except Exception:
+            pass
+        return cleaned
+
     def add_champion(self, name: str) -> int:
         if not name or name == "<EMPTY>":
             return 0
         norm_name = self.normalize_name(name)
         if norm_name in self.champ_to_idx:
-            return self.champ_to_idx[norm_name]
+            idx = self.champ_to_idx[norm_name]
+            if name != norm_name and name not in self.champ_to_idx:
+                self.champ_to_idx[name] = idx
+            return idx
 
-        new_idx = len(self.champ_to_idx) + 1
+        new_idx = len(self.idx_to_champ)
         self.champ_to_idx[norm_name] = new_idx
         self.idx_to_champ[new_idx] = norm_name
 
@@ -48,12 +79,6 @@ class ChampionVocabulary:
             self.champ_to_idx[name] = new_idx
 
         return new_idx
-
-    @staticmethod
-    def normalize_name(name: str) -> str:
-        if not name:
-            return "<EMPTY>"
-        return name.strip()
 
     def encode(self, name: str | None) -> int:
         if not name:
@@ -119,25 +144,56 @@ class ItemVocabulary:
         except Exception:
             pass
 
+    @staticmethod
+    def normalize_name(name: str) -> str:
+        """Resolve raw Riot/MetaTFT strings (e.g. DA_WarmogsArmor) to canonical item IDs."""
+        if not name or name == "<NO_ITEM>":
+            return "<NO_ITEM>"
+        cleaned = name.strip()
+        try:
+            from tft_ai_player.simulation.sets.set18 import SET18_ITEMS_CATALOG
+            if cleaned in SET18_ITEMS_CATALOG:
+                return cleaned
+            base = re.sub(r"^(DA_|TFT18_|TFT_Item_)?(Component_)?", "", cleaned, flags=re.IGNORECASE)
+            candidates = [
+                f"TFT_Item_{base}",
+                f"TFT18_Item_{base}",
+                base,
+            ]
+            for c in candidates:
+                if c in SET18_ITEMS_CATALOG:
+                    return c
+        except Exception:
+            pass
+        return cleaned
+
     def add_item(self, name: str) -> int:
         if not name or name == "<NO_ITEM>":
             return 0
-        norm_name = name.strip()
+        norm_name = self.normalize_name(name)
         if norm_name in self.item_to_idx:
-            return self.item_to_idx[norm_name]
+            idx = self.item_to_idx[norm_name]
+            if name != norm_name and name not in self.item_to_idx:
+                self.item_to_idx[name] = idx
+            return idx
 
-        new_idx = len(self.item_to_idx) + 1
+        new_idx = len(self.idx_to_item)
         self.item_to_idx[norm_name] = new_idx
         self.idx_to_item[new_idx] = norm_name
+
+        if name != norm_name and name not in self.item_to_idx:
+            self.item_to_idx[name] = new_idx
 
         return new_idx
 
     def encode(self, name: str | None) -> int:
         if not name:
             return 0
-        norm = name.strip()
+        norm = self.normalize_name(name)
         if norm in self.item_to_idx:
             return self.item_to_idx[norm]
+        if name in self.item_to_idx:
+            return self.item_to_idx[name]
         return self.add_item(name)
 
     def decode(self, idx: int) -> str:

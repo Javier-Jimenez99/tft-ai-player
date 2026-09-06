@@ -36,8 +36,14 @@ class BoardQualityNet(nn.Module):
         super().__init__()
         self.trunk = trunk
         self.freeze_trunk = freeze_trunk
+        self.hidden_dim = hidden_dim
+        self.dropout = dropout
 
-        f_dim = self.trunk.fused_dim  # exactly 320D (100% unified with RL policy and World Model)
+        if freeze_trunk:
+            for p in self.trunk.parameters():
+                p.requires_grad = False
+
+        f_dim = self.trunk.fused_dim  # unified with trunk fused_dim (e.g. 384D)
 
         # 1. Placement Regression Head: E[Placement] ∈ [1.0, 8.0]
         self.placement_head = nn.Sequential(
@@ -144,6 +150,8 @@ class BoardQualityNet(nn.Module):
         torch.save(
             {
                 "model_state_dict": self.state_dict(),
+                "hidden_dim": self.hidden_dim,
+                "dropout": self.dropout,
                 "trunk_config": {
                     "num_champs": self.trunk.num_champs,
                     "num_items": self.trunk.num_items,
@@ -164,16 +172,22 @@ class BoardQualityNet(nn.Module):
         """Load trained BoardQualityNet from disk."""
         target_device = device or torch.device("cpu")
         checkpoint = torch.load(path, map_location=target_device, weights_only=False)
+        cfg = checkpoint.get("trunk_config", {})
+        hidden_dim = checkpoint.get("hidden_dim", 128)
+        dropout = checkpoint.get("dropout", 0.1)
+
         if trunk is None:
-            cfg = checkpoint.get("trunk_config", {})
             trunk = MultiModalFusionTrunk(
                 num_champs=cfg.get("num_champs", 500),
                 num_items=cfg.get("num_items", 300),
                 num_traits=cfg.get("num_traits", 60),
                 fused_dim=cfg.get("fused_dim", 320),
             )
-        model = cls(trunk=trunk, freeze_trunk=True)
-        model.load_state_dict(checkpoint.get("model_state_dict", checkpoint), strict=False)
+        model = cls(trunk=trunk, freeze_trunk=True, hidden_dim=hidden_dim, dropout=dropout)
+        raw_sd = checkpoint.get("model_state_dict", checkpoint)
+        curr_sd = model.state_dict()
+        filtered_sd = {k: v for k, v in raw_sd.items() if k in curr_sd and curr_sd[k].shape == v.shape}
+        model.load_state_dict(filtered_sd, strict=False)
         model.to(target_device)
         model.eval()
         return model

@@ -23,7 +23,12 @@ from torch.utils.data import DataLoader
 
 from tft_ai_player.embeddings.model import MultiModalFusionTrunk
 from tft_ai_player.embeddings.vocab import ChampionVocabulary, ItemVocabulary, TraitVocabulary
-from tft_ai_player.round_winner.embedding_model import DeepSiameseCombatNet, CombatDataset, combat_collate_fn
+from tft_ai_player.round_winner.embedding_model import (
+    DeepSiameseCombatNet,
+    CombatDataset,
+    combat_collate_fn,
+    build_optimizer_param_groups,
+)
 from tft_ai_player.simulation.sets.set18 import get_set18_data
 
 
@@ -31,12 +36,13 @@ def train_deep_siamese_combat(
     data_dir: Path | str = "D:/tft-winner-data/set18/players",
     output_dir: Path | str = "models/round_winner",
     trunk_ckpt_path: Path | str = "models/trunk/trunk_best.pt",
-    max_files: int = 50,
+    max_files: int = 400,
     batch_size: int = 256,
-    epochs: int = 10,
+    epochs: int = 15,
     lr: float = 1e-3,
     hidden_dim: int = 256,
     dropout: float = 0.15,
+    logit_scale: float = 2.2,
     device: torch.device | str | None = None,
 ) -> Path:
     dev = torch.device(device if device else ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -77,9 +83,8 @@ def train_deep_siamese_combat(
     print(f" [+] Split dataset: Train = {len(train_df):,} rounds | Test = {len(test_df):,} rounds")
 
     # 3. Load Exact Pretrained Vocabularies
-    model_dir = Path("D:/tft-winner-data/set18/models/trunk")
-    if not model_dir.exists():
-        model_dir = Path("models/trunk")
+    trunk_ckpt = Path(trunk_ckpt_path)
+    model_dir = trunk_ckpt.parent if trunk_ckpt.exists() else Path("models/trunk")
 
     print(f" [+] Loading serialized vocabularies from {model_dir}...")
     vocab = ChampionVocabulary.load(model_dir / "vocab.json") if (model_dir / "vocab.json").exists() else ChampionVocabulary()
@@ -93,38 +98,48 @@ def train_deep_siamese_combat(
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=combat_collate_fn, num_workers=0)
     test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, collate_fn=combat_collate_fn, num_workers=0)
 
-    # 4. Load Pretrained Trunk Backbone (trunk_pretrained.pt)
-    ckpt_file = model_dir / "trunk_pretrained.pt" if (model_dir / "trunk_pretrained.pt").exists() else model_dir / "trunk_best.pt"
+    # 4. Load Pretrained Trunk Backbone
+    ckpt_file = trunk_ckpt if trunk_ckpt.exists() else (model_dir / "trunk_best.pt")
     print(f" [+] Loading trunk checkpoint from {ckpt_file}...")
     checkpoint = torch.load(ckpt_file, map_location="cpu", weights_only=False)
-    state_dict = checkpoint.get("state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
+    raw_sd = checkpoint.get("trunk_state_dict", checkpoint.get("model_state_dict", checkpoint.get("state_dict", checkpoint)))
+    state_dict = {k.replace("trunk.", ""): v for k, v in raw_sd.items() if "head" not in k}
     cfg = checkpoint.get("config", {}) if isinstance(checkpoint, dict) else {}
 
     trunk = MultiModalFusionTrunk(
-        num_champs=cfg.get("num_champs", len(vocab)),
-        num_items=cfg.get("num_items", len(item_vocab)),
-        num_traits=cfg.get("num_traits", len(trait_vocab)),
+        num_champs=cfg.get("num_champs", 500),
+        num_items=cfg.get("num_items", 300),
+        num_traits=cfg.get("num_traits", 60),
         champ_embed_dim=cfg.get("champ_embed_dim", 32),
         board_feat_dim=cfg.get("board_feat_dim", 256),
         state_feat_dim=cfg.get("state_feat_dim", 64),
-        fused_dim=cfg.get("fused_dim", 320),
+        fused_dim=cfg.get("fused_dim", 384),
         num_layers=cfg.get("num_layers", 2),
         dropout=cfg.get("dropout", 0.1),
     )
-    trunk.load_state_dict(state_dict)
+    trunk.load_state_dict(state_dict, strict=False)
     trunk.freeze()
     trunk.to(dev)
-    print(f" [+] Pre-trained Trunk successfully loaded on {dev}!")
+    print(f" [+] Pre-trained Trunk successfully loaded on {dev}! (fused_dim={trunk.fused_dim})")
 
-    # 5. Instantiate DeepSiameseCombatNet
+    # 5. Instantiate DeepSiameseCombatNet (Train on natural 1.0 scale)
     model = DeepSiameseCombatNet(
         trunk=trunk,
         freeze_trunk=True,
         hidden_dim=hidden_dim,
         dropout=dropout,
+        logit_scale=1.0,
     ).to(dev)
 
-    optimizer = torch.optim.AdamW(model.interaction_mlp.parameters(), lr=lr, weight_decay=1e-4)
+    decay_params, no_decay_params = build_optimizer_param_groups(model, weight_decay=1e-4)
+    optimizer = torch.optim.AdamW(
+        [
+            {"params": decay_params, "weight_decay": 1e-4},
+            {"params": no_decay_params, "weight_decay": 0.0},
+        ],
+        lr=lr,
+    )
+    all_trainable = decay_params + no_decay_params
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     criterion = nn.BCEWithLogitsLoss()
 
@@ -149,6 +164,7 @@ def train_deep_siamese_combat(
             logits = model(f_b, o_b)
             loss = criterion(logits, targets)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(all_trainable, max_norm=1.0)
             optimizer.step()
 
             total_loss += loss.item() * len(targets)
@@ -192,6 +208,7 @@ def train_deep_siamese_combat(
     # 7. Final Evaluation on Holdout Test Set
     if best_weights is not None:
         model.load_state_dict(best_weights)
+    model.logit_scale.copy_(torch.tensor(float(logit_scale)))
     model.to(dev)
     model.eval()
 
@@ -263,10 +280,11 @@ if __name__ == "__main__":
     parser.add_argument("--data-dir", type=str, default="D:/tft-winner-data/set18/players")
     parser.add_argument("--output-dir", type=str, default="models/round_winner")
     parser.add_argument("--trunk-ckpt", type=str, default="models/trunk/trunk_best.pt")
-    parser.add_argument("--files", type=int, default=50)
-    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--files", type=int, default=400)
+    parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--logit-scale", type=float, default=2.30)
     args = parser.parse_args()
 
     train_deep_siamese_combat(
@@ -277,4 +295,5 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         epochs=args.epochs,
         lr=args.lr,
+        logit_scale=args.logit_scale,
     )

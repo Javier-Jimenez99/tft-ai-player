@@ -467,6 +467,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=default_world_model_ckpt,
         help=f"path to pre-trained StateTransitionPredictor (World Model) checkpoint (default: {default_world_model_ckpt})",
     )
+    rl_train_parser.add_argument(
+        "--no-world-model",
+        action="store_true",
+        help="disable the optional StateTransitionPredictor world model",
+    )
     default_board_eval_ckpt = (
         "models/board_evaluator/board_quality_best.pt"
         if Path("models/board_evaluator/board_quality_best.pt").exists()
@@ -2954,7 +2959,7 @@ def _run_rl_train(args: argparse.Namespace) -> int:
     trainer = LeagueTrainer(
         set_data=get_set18_data(),
         trunk_checkpoint=args.trunk_checkpoint,
-        world_model_checkpoint=args.world_model_checkpoint,
+        world_model_checkpoint=None if args.no_world_model else args.world_model_checkpoint,
         board_evaluator_checkpoint=getattr(args, "board_evaluator_checkpoint", None),
         z_index_path=args.z_index_path,
         round_winner_model_path=args.round_winner_model,
@@ -3149,7 +3154,9 @@ def _run_rl_eval_shadow(args: argparse.Namespace) -> int:
         print(f" [-] Checkpoint path does not exist: {ckpt_path}")
         return 1
 
-    policy = TFTActorCritic(obs_dim=768, action_dim=111).to(device)
+    from .simulation.actions import TOTAL_DISCRETE_ACTIONS
+
+    policy = TFTActorCritic(obs_dim=768, action_dim=TOTAL_DISCRETE_ACTIONS).to(device)
     state_dict = torch.load(ckpt_path, map_location=device)
     if "model" in state_dict:
         policy.load_state_dict(state_dict["model"])

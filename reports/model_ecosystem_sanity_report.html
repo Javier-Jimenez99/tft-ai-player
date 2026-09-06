@@ -214,12 +214,12 @@
             <div>
                 <h1>TFT-AI Model Ecosystem Sanity & Benchmark Audit</h1>
                 <div class="meta-info">
-                    Timestamp: <strong>2026-09-06T13:28:41Z</strong> | Device: <strong>cuda</strong> | Audit Runtime: <strong>4.54s</strong>
+                    Timestamp: <strong>2026-09-06T19:33:51Z</strong> | Device: <strong>cuda</strong> | Audit Runtime: <strong>4.21s</strong>
                 </div>
             </div>
             <div>
                 <span class="badge status-fail" style="font-size: 1rem; padding: 0.5rem 1rem;">
-                    Ecosystem Health: 56.5%
+                    Ecosystem Health: 96.3%
                 </span>
             </div>
         </header>
@@ -231,15 +231,15 @@
             </div>
             <div class="stat-card">
                 <div class="stat-title">Axiomatic Tests Executed</div>
-                <div class="stat-value">23</div>
+                <div class="stat-value">27</div>
             </div>
             <div class="stat-card">
                 <div class="stat-title">Tests Passed</div>
-                <div class="stat-value" style="color: var(--pass-text);">13</div>
+                <div class="stat-value" style="color: var(--pass-text);">26</div>
             </div>
             <div class="stat-card">
                 <div class="stat-title">Critical Law Violations</div>
-                <div class="stat-value" style="color: var(--fail-text);">10</div>
+                <div class="stat-value" style="color: var(--fail-text);">1</div>
             </div>
         </div>
 
@@ -250,35 +250,31 @@
                         <h2 class="card-title">MultiModalFusionTrunk</h2>
                         <div class="card-subtitle font-mono">models/trunk/trunk_best.pt</div>
                     </div>
-                    <div><span class="badge status-fail">FAIL</span></div>
+                    <div><span class="badge status-pass">PASS</span></div>
                 </div>
                 
-                <div class="diagnosis-box diag-fail">
-                    <strong>Diagnosis & Root Cause:</strong> MultiModalFusionTrunk exhibits severe Item Feature Collapse: identical boards with 9 completed items versus 0 items have cos_sim = 0.9641 (96.4% identical). The transformer attention and trait projection drown out item representations.
-                </div>
-            
                 
                 <div class="metrics-container">
                     <div class="section-title">Empirical Replay Metrics</div>
                     <div class="metrics-grid">
                     <div class="metric-pill">
                         <span class="text-dim">Champ embed norm:</span>
-                        <span class="font-mono font-semibold">126.57</span>
+                        <span class="font-mono font-semibold">126.55</span>
                     </div>
                 
                     <div class="metric-pill">
                         <span class="text-dim">Star embed norm:</span>
-                        <span class="font-mono font-semibold">6.01</span>
+                        <span class="font-mono font-semibold">5.44</span>
                     </div>
                 
                     <div class="metric-pill">
                         <span class="text-dim">Item embed norm:</span>
-                        <span class="font-mono font-semibold">68.86</span>
+                        <span class="font-mono font-semibold">96.6</span>
                     </div>
                 
                     <div class="metric-pill">
                         <span class="text-dim">Item embed std:</span>
-                        <span class="font-mono font-semibold">0.9923</span>
+                        <span class="font-mono font-semibold">0.9843</span>
                     </div>
                 
                     <div class="metric-pill">
@@ -308,7 +304,7 @@
                     <td class="text-dim text-sm">Different champions must have separated embedding vectors in Champ2Vec</td>
                     <td class="font-mono text-sm">cos_sim(champ_i, champ_j) < 0.85</td>
                     <td class="font-mono text-sm">< 0.850</td>
-                    <td class="font-mono text-sm font-semibold">0.2428</td>
+                    <td class="font-mono text-sm font-semibold">-0.0318</td>
                     <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
@@ -316,9 +312,9 @@
                     <td class="font-medium">Star Progression Monotonicity</td>
                     <td class="text-dim text-sm">Upgrades must progress along the star embedding manifold</td>
                     <td class="font-mono text-sm">dist(1*, 2*) < dist(1*, 3*)</td>
-                    <td class="font-mono text-sm">d(1,2) < d(1,3) (actual: 5.11 vs 3.79)</td>
-                    <td class="font-mono text-sm font-semibold">5.11 < 3.79</td>
-                    <td><span class="badge badge-sm status-fail">FAIL</span></td>
+                    <td class="font-mono text-sm">d(1,2) < d(1,3) (actual: 1.27 vs 2.39)</td>
+                    <td class="font-mono text-sm font-semibold">1.27 < 2.39</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
                 <tr>
@@ -326,8 +322,8 @@
                     <td class="text-dim text-sm">A board with 9 completed items must cause significant vector separation from 0 items</td>
                     <td class="font-mono text-sm">cos_sim(h_no_items, h_full_items) < 0.90</td>
                     <td class="font-mono text-sm">< 0.900</td>
-                    <td class="font-mono text-sm font-semibold">cos_sim = 0.9641 (dist = 2.99)</td>
-                    <td><span class="badge badge-sm status-fail">FAIL</span></td>
+                    <td class="font-mono text-sm font-semibold">cos_sim = 0.8279 (dist = 3.70)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
                         </tbody>
@@ -342,11 +338,11 @@
                         <h2 class="card-title">DeepSiameseCombatNet</h2>
                         <div class="card-subtitle font-mono">models\round_winner\deep_siamese_combat_best.pt</div>
                     </div>
-                    <div><span class="badge status-fail">FAIL</span></div>
+                    <div><span class="badge status-pass">PASS</span></div>
                 </div>
                 
-                <div class="diagnosis-box diag-fail">
-                    <strong>Diagnosis & Root Cause:</strong> DeepSiameseCombatNet fails the Item Advantage Law (51.47% vs required >= 80%). Because item embeddings have low gradient magnitude in the interaction MLP, combat resolution treats items as negligible, preventing RL agents from learning that itemizing carries wins games.
+                <div class="diagnosis-box diag-warn">
+                    <strong>Diagnosis & Root Cause:</strong> All combat sanity laws passed.
                 </div>
             
                 
@@ -360,12 +356,12 @@
                 
                     <div class="metric-pill">
                         <span class="text-dim">Mean win probability vs human boards:</span>
-                        <span class="font-mono font-semibold">55.34%</span>
+                        <span class="font-mono font-semibold">80.17%</span>
                     </div>
                 
                     <div class="metric-pill">
                         <span class="text-dim">Std win probability:</span>
-                        <span class="font-mono font-semibold">25.09%</span>
+                        <span class="font-mono font-semibold">14.90%</span>
                     </div>
                 </div>
                 </div>
@@ -390,7 +386,7 @@
                     <td class="text-dim text-sm">P(Board A beats Board A) must strictly evaluate to 50.0%</td>
                     <td class="font-mono text-sm">|P(A vs A) - 50.0%| <= 2.0%</td>
                     <td class="font-mono text-sm">50.00% +/- 2.0%</td>
-                    <td class="font-mono text-sm font-semibold">50.88%</td>
+                    <td class="font-mono text-sm font-semibold">50.00%</td>
                     <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
@@ -399,8 +395,8 @@
                     <td class="text-dim text-sm">Combat resolver must be mathematically anti-symmetric across focal/opponent swap</td>
                     <td class="font-mono text-sm">P(A vs B) + P(B vs A) == 100.0%</td>
                     <td class="font-mono text-sm">100.00% +/- 1.0%</td>
-                    <td class="font-mono text-sm font-semibold">102.97% (51.5% + 51.5%)</td>
-                    <td><span class="badge badge-sm status-fail">FAIL</span></td>
+                    <td class="font-mono text-sm font-semibold">100.00% (7.2% + 92.8%)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
                 <tr>
@@ -408,7 +404,7 @@
                     <td class="text-dim text-sm">9 units (2-star) must overwhelmingly crush 3 units (1-star)</td>
                     <td class="font-mono text-sm">P(9 Units vs 3 Units) >= 95.0%</td>
                     <td class="font-mono text-sm">>= 95.00%</td>
-                    <td class="font-mono text-sm font-semibold">96.10%</td>
+                    <td class="font-mono text-sm font-semibold">99.87%</td>
                     <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
@@ -417,7 +413,7 @@
                     <td class="text-dim text-sm">Full 3-star composition must consistently defeat an identical 1-star composition</td>
                     <td class="font-mono text-sm">P(3-Star vs 1-Star) >= 90.0%</td>
                     <td class="font-mono text-sm">>= 90.00%</td>
-                    <td class="font-mono text-sm font-semibold">96.12%</td>
+                    <td class="font-mono text-sm font-semibold">96.30%</td>
                     <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
@@ -426,8 +422,8 @@
                     <td class="text-dim text-sm">An identical composition equipped with 9 completed meta items must overwhelmingly defeat 0 items</td>
                     <td class="font-mono text-sm">P(9 Items vs 0 Items) >= 80.0%</td>
                     <td class="font-mono text-sm">>= 80.00%</td>
-                    <td class="font-mono text-sm font-semibold">51.47%</td>
-                    <td><span class="badge badge-sm status-fail">FAIL</span></td>
+                    <td class="font-mono text-sm font-semibold">92.83%</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
                 <tr>
@@ -435,7 +431,7 @@
                     <td class="text-dim text-sm">Full 4-cost / 5-cost composition must overpower a 1-cost composition of equal stars</td>
                     <td class="font-mono text-sm">P(High Cost vs Low Cost) >= 75.0%</td>
                     <td class="font-mono text-sm">>= 75.00%</td>
-                    <td class="font-mono text-sm font-semibold">79.59%</td>
+                    <td class="font-mono text-sm font-semibold">75.31%</td>
                     <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
@@ -451,13 +447,9 @@
                         <h2 class="card-title">BoardQualityNet</h2>
                         <div class="card-subtitle font-mono">models\board_evaluator\board_quality_best.pt</div>
                     </div>
-                    <div><span class="badge status-fail">FAIL</span></div>
+                    <div><span class="badge status-pass">PASS</span></div>
                 </div>
                 
-                <div class="diagnosis-box diag-fail">
-                    <strong>Diagnosis & Root Cause:</strong> BoardQualityNet fails the Itemization Benefit Law (Delta = +0.02 places). The oracle predicts almost the exact same tournament placement regardless of whether a team has 9 items or 0 items.
-                </div>
-            
                 
                 <div class="table-container">
                     <div class="section-title">Deterministic Axiomatic Law Tests</div>
@@ -479,8 +471,8 @@
                     <td class="text-dim text-sm">A capped Stage 5 Level 9 board must predict a substantially superior finish than an early weak board</td>
                     <td class="font-mono text-sm">E[Place_weak] - E[Place_capped] >= 2.0 places</td>
                     <td class="font-mono text-sm">>= +2.00 places difference</td>
-                    <td class="font-mono text-sm font-semibold">+0.69 places (Capped: 1.30, Weak: 2.00)</td>
-                    <td><span class="badge badge-sm status-fail">FAIL</span></td>
+                    <td class="font-mono text-sm font-semibold">+2.37 places (Capped: 1.74, Weak: 4.11)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
                 <tr>
@@ -488,8 +480,8 @@
                     <td class="text-dim text-sm">Upgrading an entire board from 1-star to 3-star must meaningfully improve placement</td>
                     <td class="font-mono text-sm">E[Place_1star] - E[Place_3star] >= 0.50 places</td>
                     <td class="font-mono text-sm">>= +0.50 places improvement</td>
-                    <td class="font-mono text-sm font-semibold">+0.30 places (1*: 1.77 -> 3*: 1.48)</td>
-                    <td><span class="badge badge-sm status-fail">FAIL</span></td>
+                    <td class="font-mono text-sm font-semibold">+0.86 places (1*: 3.87 -> 3*: 3.01)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
                 <tr>
@@ -497,8 +489,8 @@
                     <td class="text-dim text-sm">Equipping 9 completed meta items on carries/tanks must improve expected placement</td>
                     <td class="font-mono text-sm">E[Place_naked] - E[Place_items] >= 0.40 places</td>
                     <td class="font-mono text-sm">>= +0.40 places improvement</td>
-                    <td class="font-mono text-sm font-semibold">+0.02 places (Naked: 1.61 -> Full: 1.59)</td>
-                    <td><span class="badge badge-sm status-fail">FAIL</span></td>
+                    <td class="font-mono text-sm font-semibold">+0.52 places (Naked: 3.25 -> Full: 2.72)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
                 <tr>
@@ -506,8 +498,8 @@
                     <td class="text-dim text-sm">At identical boards, a player with 100 HP must have a strictly higher Top-4 probability than a player at 12 HP</td>
                     <td class="font-mono text-sm">P(Top-4 | 100 HP) - P(Top-4 | 12 HP) >= 10.0%</td>
                     <td class="font-mono text-sm">>= +10.00% higher survival</td>
-                    <td class="font-mono text-sm font-semibold">+5.5% points (100 HP: 100.0%, 12 HP: 94.5%)</td>
-                    <td><span class="badge badge-sm status-fail">FAIL</span></td>
+                    <td class="font-mono text-sm font-semibold">+64.5% points (100 HP: 99.1%, 12 HP: 34.6%)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
                         </tbody>
@@ -546,7 +538,7 @@
                     <td class="text-dim text-sm">World Model must predict non-zero transition dynamics (must not output identity copy of input)</td>
                     <td class="font-mono text-sm">cos_sim(s_t, s_hat_{t+1}) < 0.9995</td>
                     <td class="font-mono text-sm">< 0.9995 (genuine transition)</td>
-                    <td class="font-mono text-sm font-semibold">0.99937</td>
+                    <td class="font-mono text-sm font-semibold">0.93567</td>
                     <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
@@ -555,7 +547,7 @@
                     <td class="text-dim text-sm">Multi-step recursive lookahead must not explode towards infinity or collapse to zero</td>
                     <td class="font-mono text-sm">0.50 <= ||s_{t+5}|| / ||s_t|| <= 2.00</td>
                     <td class="font-mono text-sm">[0.50, 2.00]</td>
-                    <td class="font-mono text-sm font-semibold">0.986x norm ratio</td>
+                    <td class="font-mono text-sm font-semibold">0.987x norm ratio</td>
                     <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
@@ -564,7 +556,7 @@
                     <td class="text-dim text-sm">Predicted change delta must have measurable non-zero Euclidean magnitude</td>
                     <td class="font-mono text-sm">||s_hat_{t+1} - s_t|| > 0.01</td>
                     <td class="font-mono text-sm">> 0.010</td>
-                    <td class="font-mono text-sm font-semibold">0.4778</td>
+                    <td class="font-mono text-sm font-semibold">3.4793</td>
                     <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
@@ -599,7 +591,7 @@
                 
                     <div class="metric-pill">
                         <span class="text-dim">Mean centroid norm:</span>
-                        <span class="font-mono font-semibold">0.620</span>
+                        <span class="font-mono font-semibold">0.533</span>
                     </div>
                 </div>
                 </div>
@@ -624,7 +616,7 @@
                     <td class="text-dim text-sm">Target archetypes must represent distinctly separated strategic comps</td>
                     <td class="font-mono text-sm">max_{i != j} cos_sim(z_i, z_j) < 0.85</td>
                     <td class="font-mono text-sm">< 0.850</td>
-                    <td class="font-mono text-sm font-semibold">0.4861 (mean sim = -0.1347)</td>
+                    <td class="font-mono text-sm font-semibold">0.3885 (mean sim = -0.1353)</td>
                     <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
@@ -633,7 +625,16 @@
                     <td class="text-dim text-sm">All k cluster centroids must possess non-trivial vector magnitude</td>
                     <td class="font-mono text-sm">min_k ||z_k|| > 0.10</td>
                     <td class="font-mono text-sm">> 0.100</td>
-                    <td class="font-mono text-sm font-semibold">0.5353</td>
+                    <td class="font-mono text-sm font-semibold">0.4684</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Semantic Composition Alignment Law</td>
+                    <td class="text-dim text-sm">Canonical tournament compositions must project positively into the latent archetype subspace</td>
+                    <td class="font-mono text-sm">max_k cos_sim(h_{comp}, z_k) > 0.15</td>
+                    <td class="font-mono text-sm">> 0.150 for meta comps</td>
+                    <td class="font-mono text-sm font-semibold">Comp A max sim = 0.3469, Comp B max sim = 0.4592</td>
                     <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
@@ -652,6 +653,10 @@
                     <div><span class="badge status-pass">PASS</span></div>
                 </div>
                 
+                <div class="diagnosis-box diag-warn">
+                    <strong>Diagnosis & Root Cause:</strong> All Elo regressor sanity laws passed.
+                </div>
+            
                 
                 <div class="table-container">
                     <div class="section-title">Deterministic Axiomatic Law Tests</div>
@@ -673,7 +678,34 @@
                     <td class="text-dim text-sm">MatchEloRegressor deserializes cleanly and exposes competitive predict_match interface</td>
                     <td class="font-mono text-sm">hasattr(model, 'predict_match')</td>
                     <td class="font-mono text-sm">True</td>
-                    <td class="font-mono text-sm font-semibold">hasattr = True (Sample Output: 2176 ELO (EMERALD))</td>
+                    <td class="font-mono text-sm font-semibold">hasattr = True</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Competitive Tempo Monotonicity Law</td>
+                    <td class="text-dim text-sm">Aggressive Challenger tempo must predict strictly higher rating than passive low-tier play</td>
+                    <td class="font-mono text-sm">Elo(Challenger Tempo) - Elo(Iron Tempo) >= +800</td>
+                    <td class="font-mono text-sm">>= +800 ELO separation</td>
+                    <td class="font-mono text-sm font-semibold">Delta = +1501 ELO (Challenger: 2895 [MASTER] vs Iron: 1394 [GOLD])</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Solution Space OOD Detection Law</td>
+                    <td class="text-dim text-sm">Valid human gameplay must be flagged in-distribution, aberrant bot trajectories flagged as outliers</td>
+                    <td class="font-mono text-sm">Human == Inlier and Aberrant Bot == Outlier</td>
+                    <td class="font-mono text-sm">Human inlier and Bot outlier</td>
+                    <td class="font-mono text-sm font-semibold">Human inlier=True (98.8%), Bot outlier=True (Dist=32.5)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Competitive Elo Range Boundedness Law</td>
+                    <td class="text-dim text-sm">Predicted Elo ratings must remain within realistic ranked ladder bounds [100, 4600]</td>
+                    <td class="font-mono text-sm">100.0 <= Elo <= 4600.0</td>
+                    <td class="font-mono text-sm">[100, 4600]</td>
+                    <td class="font-mono text-sm font-semibold">Challenger: 2895, Iron: 1394</td>
                     <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
@@ -693,7 +725,7 @@
                 </div>
                 
                 <div class="diagnosis-box diag-fail">
-                    <strong>Diagnosis & Root Cause:</strong> TFTActorCritic Critic head fails the Item Sensitivity Law (Delta = -0.0374). The value function estimates zero additional cumulative reward for having 9 completed meta items, meaning PPO receives no gradient incentive to prioritize itemizing units.
+                    <strong>Diagnosis & Root Cause:</strong> TFTActorCritic fails the following laws: Critic Item Sensitivity Law.
                 </div>
             
                 
@@ -726,7 +758,7 @@
                     <td class="text-dim text-sm">Higher health buffer must reflect higher expected cumulative return V(s)</td>
                     <td class="font-mono text-sm">V(s | 100 HP) > V(s | 12 HP)</td>
                     <td class="font-mono text-sm">V(100 HP) > V(12 HP)</td>
-                    <td class="font-mono text-sm font-semibold">Delta = +3.2347 (100 HP: +9.651 vs 12 HP: +6.416)</td>
+                    <td class="font-mono text-sm font-semibold">Delta = +1.5685 (100 HP: +5.444 vs 12 HP: +3.876)</td>
                     <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
@@ -735,8 +767,8 @@
                     <td class="text-dim text-sm">A 9-unit full board must evaluate to a strictly higher expected return than a 3-unit board</td>
                     <td class="font-mono text-sm">V(s | 9 Units) > V(s | 3 Units)</td>
                     <td class="font-mono text-sm">V(9 Units) > V(3 Units)</td>
-                    <td class="font-mono text-sm font-semibold">Delta = -0.8584 (9 Units: +7.749 vs 3 Units: +8.608)</td>
-                    <td><span class="badge badge-sm status-fail">FAIL</span></td>
+                    <td class="font-mono text-sm font-semibold">Delta = +1.6204 (9 Units: +5.186 vs 3 Units: +3.566)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
                 </tr>
             
                 <tr>
@@ -744,7 +776,7 @@
                     <td class="text-dim text-sm">The critic value function V(s) must appreciate the massive combat value of 9 completed items</td>
                     <td class="font-mono text-sm">V(s | 9 Items) - V(s | 0 Items) > +0.10</td>
                     <td class="font-mono text-sm">>= +0.100 higher value</td>
-                    <td class="font-mono text-sm font-semibold">-0.0374 (Naked: +8.288 -> Items: +8.251)</td>
+                    <td class="font-mono text-sm font-semibold">-0.0847 (Naked: +5.093 -> Items: +5.008)</td>
                     <td><span class="badge badge-sm status-fail">FAIL</span></td>
                 </tr>
             

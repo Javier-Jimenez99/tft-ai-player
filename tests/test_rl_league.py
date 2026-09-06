@@ -65,7 +65,7 @@ def test_actor_critic_forward() -> None:
     dummy_mask = torch.ones(batch_size, TOTAL_DISCRETE_ACTIONS, dtype=torch.bool)
 
     logits, values = model(dummy_obs)
-    assert logits.shape == (batch_size, 111)
+    assert logits.shape == (batch_size, TOTAL_DISCRETE_ACTIONS)
     assert values.shape == (batch_size, 1)
 
     actions, log_probs, vals = model.get_action(dummy_obs, dummy_mask)

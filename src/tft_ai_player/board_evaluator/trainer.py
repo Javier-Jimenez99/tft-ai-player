@@ -48,7 +48,10 @@ class BoardQualityTrainer:
                 num_traits=60,
                 fused_dim=384,
             )
-            ckpt_path = Path(trunk_checkpoint or "D:/tft-winner-data/set18/models/trunk/trunk_best.pt")
+            ckpt_path = Path(trunk_checkpoint or "models/trunk/trunk_best.pt")
+            if not ckpt_path.exists():
+                ckpt_path = Path("D:/tft-winner-data/set18/models/trunk/trunk_best.pt")
+
             if ckpt_path.exists():
                 s_data = torch.load(ckpt_path, map_location="cpu", weights_only=False)
                 s_dict = s_data.get("trunk_state_dict", s_data.get("model_state_dict", s_data))
@@ -58,8 +61,21 @@ class BoardQualityTrainer:
             self.model = BoardQualityNet(trunk=trunk, freeze_trunk=True)
 
         self.model.to(self.device)
-        trainable_params = [p for p in self.model.parameters() if p.requires_grad]
-        self.optimizer = torch.optim.AdamW(trainable_params, lr=lr, weight_decay=weight_decay)
+        decay_params = []
+        no_decay_params = []
+        for name, param in self.model.named_parameters():
+            if not param.requires_grad:
+                continue
+            if param.dim() >= 2 and not any(nd in name for nd in ["norm", "bias", "embedding"]):
+                decay_params.append(param)
+            else:
+                no_decay_params.append(param)
+
+        param_groups = [
+            {"params": decay_params, "weight_decay": weight_decay},
+            {"params": no_decay_params, "weight_decay": 0.0},
+        ]
+        self.optimizer = torch.optim.AdamW(param_groups, lr=lr)
 
         # WandB Experiment Logger
         self.use_wandb = use_wandb
@@ -367,11 +383,14 @@ class BoardQualityTrainer:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Train Board Quality & Placement Predictor Network")
     parser.add_argument("--data-dir", type=str, default="D:/tft-winner-data/set18/players")
-    parser.add_argument("--trunk-checkpoint", type=str, default="D:/tft-winner-data/set18/models/trunk/trunk_best.pt")
+    parser.add_argument("--files", type=int, default=None, help="Maximum number of player CSV files to load")
+    parser.add_argument("--trunk-checkpoint", type=str, default="models/trunk/trunk_best.pt")
     parser.add_argument("--output-dir", type=str, default="models/board_evaluator")
-    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--batch-size", type=int, default=128)
-    parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--weight-decay", type=float, default=1e-4)
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--num-threads", type=int, default=4)
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--wandb-project", type=str, default="tft-board-evaluator")
@@ -383,16 +402,18 @@ def main() -> int:
     print("=" * 70)
     print(" [TFT BOARD EVALUATOR] Value Oracle & Placement Predictor Training")
     print(f"  Device: {args.device} (CPU threads: {args.num_threads if args.device == 'cpu' else 'N/A'})")
-    print(f"  Data: {args.data_dir} | Output: {args.output_dir}")
+    print(f"  Data: {args.data_dir} (files limit: {args.files}) | Output: {args.output_dir}")
     print("=" * 70)
 
-    dataset = BoardPlacementDataset(data_dir=args.data_dir, max_samples=args.max_samples)
+    dataset = BoardPlacementDataset(data_dir=args.data_dir, max_samples=args.max_samples, max_files=args.files)
     if len(dataset) == 0:
         print("[!] No valid samples loaded from data directory.", file=sys.stderr)
         return 1
 
     trainer = BoardQualityTrainer(
         trunk_checkpoint=args.trunk_checkpoint,
+        lr=args.lr,
+        weight_decay=args.weight_decay,
         device=args.device,
         num_threads=args.num_threads,
         use_wandb=not args.no_wandb,

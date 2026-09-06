@@ -211,8 +211,10 @@ class LeagueTrainer:
                 self.combat_resolver = HeuristicCombatResolver()
                 print(f" [+] Combat Resolver: Heuristic (Fallback)")
 
-        # 5. Unified PPO Actor-Critic Model (Obs Dim = fused_dim + 384)
-        obs_dim = self.trunk.fused_dim + 384
+        # 5. Unified PPO Actor-Critic Model
+        # obs_dim = s_t(384, trunk.fused_dim) + shop_feat(64) + bench_feat(64) + z_target(256) = 768D
+        # Note: s_t is trunk.fusion output = 384D (NOT 320D as older docstrings incorrectly stated)
+        obs_dim = self.trunk.fused_dim + 64 + 64 + 256  # = 768
         if model is None:
             self.model = TFTActorCritic(obs_dim=obs_dim, action_dim=TOTAL_DISCRETE_ACTIONS, hidden_dim=512)
         else:
@@ -502,8 +504,10 @@ class LeagueTrainer:
         reroll_pct = float(np.mean(valid_actions == 6)) * 100.0
         buy_xp_pct = float(np.mean(valid_actions == 7)) * 100.0
         sell_bench_pct = float(np.mean((valid_actions >= 8) & (valid_actions <= 16))) * 100.0
-        deploy_board_pct = float(np.mean((valid_actions >= 17) & (valid_actions <= 44))) * 100.0
-        equip_item_pct = float(np.mean((valid_actions >= 45) & (valid_actions <= 110))) * 100.0
+        sell_board_pct = float(np.mean((valid_actions >= 17) & (valid_actions <= 44))) * 100.0
+        deploy_board_pct = float(np.mean((valid_actions >= 45) & (valid_actions <= 72))) * 100.0
+        move_board_pct = float(np.mean((valid_actions >= 73) & (valid_actions <= 100))) * 100.0
+        equip_item_pct = float(np.mean((valid_actions >= 101) & (valid_actions <= 110))) * 100.0
 
         target_cluster_match_rate = float(np.mean(cluster_matches)) * 100.0 if cluster_matches else 0.0
         macro_alignment_cosine = float(np.mean(macro_sims)) if macro_sims else 0.0
@@ -533,8 +537,10 @@ class LeagueTrainer:
             "action_equip_item_pct": equip_item_pct,
             "action_buy_shop_pct": buy_shop_pct,
             "action_deploy_board_pct": deploy_board_pct,
+            "action_move_board_pct": move_board_pct,
             "action_reroll_pct": reroll_pct,
             "action_sell_bench_pct": sell_bench_pct,
+            "action_sell_board_pct": sell_board_pct,
         }
 
     def train_generation(self, generation: int) -> dict[str, Any]:

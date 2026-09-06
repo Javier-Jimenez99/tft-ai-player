@@ -21,6 +21,7 @@ from tft_ai_player.simulation import (
     get_action_mask,
     get_default_set17_data,
 )
+from tft_ai_player.simulation.actions import execute_action
 
 
 @pytest.fixture
@@ -172,6 +173,64 @@ def test_item_combining_and_equipping(set_data: SetData) -> None:
     assert equip_res is True
     assert len(player.item_bench) == 0
     assert unit.items == ["TFT_Item_HextechGunblade"]
+
+
+def test_legacy_equip_action_assigns_and_crafts_on_priority_unit(
+    set_data: SetData, pool: ChampionPool
+) -> None:
+    """Legacy item actions must craft on the simulator's priority recipient."""
+    player = Player(0, set_data)
+    target = ChampionInstance(
+        champion_id="TFT17_Karma",
+        cost=4,
+        star_level=2,
+        items=["TFT_Item_BFSword"],
+    )
+    other = ChampionInstance(champion_id="TFT17_Aatrox", cost=1, star_level=1)
+    player.board[(0, 0)] = target
+    player.board[(0, 1)] = other
+    player.add_item("TFT_Item_NeedlesslyLargeRod")
+
+    action = 101
+    assert get_action_mask(player, set_data)[action]
+    assert execute_action(player, pool, set_data, action)
+    assert target.items == ["TFT_Item_HextechGunblade"]
+    assert other.items == []
+
+
+def test_moving_a_unit_preserves_its_equipped_items(set_data: SetData) -> None:
+    """Board movement may reposition a unit but must not detach its equipment."""
+    player = Player(0, set_data)
+    unit = ChampionInstance(
+        champion_id="TFT17_Karma",
+        cost=4,
+        star_level=2,
+        items=["TFT_Item_HextechGunblade"],
+    )
+    player.board[(0, 0)] = unit
+
+    assert player.move_unit(True, (0, 0), True, (1, 1))
+    assert player.board[(1, 1)].items == ["TFT_Item_HextechGunblade"]
+
+
+def test_full_item_bench_masks_sales_and_preserves_equipment(
+    set_data: SetData, pool: ChampionPool
+) -> None:
+    """Selling cannot discard equipped items when there is no item-bench space."""
+    player = Player(0, set_data)
+    unit = ChampionInstance(
+        champion_id="TFT17_Karma",
+        cost=4,
+        star_level=2,
+        items=["TFT_Item_HextechGunblade"],
+    )
+    player.board[(0, 0)] = unit
+    for _ in range(set_data.max_item_bench):
+        assert player.add_item("TFT_Item_BFSword")
+
+    assert not get_action_mask(player, set_data)[17]
+    assert not player.sell_unit(is_board=True, loc=(0, 0), pool=pool)
+    assert player.board[(0, 0)].items == ["TFT_Item_HextechGunblade"]
 
 
 def test_matchmaking_pairings(set_data: SetData) -> None:

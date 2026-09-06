@@ -205,6 +205,12 @@ def format_wandb_payload(raw_metrics: dict[str, Any]) -> dict[str, Any]:
         payload["Actions/5_Deploy_Board_Pct"] = float(raw_metrics["action_deploy_board_pct"])
     if "action_reroll_pct" in raw_metrics and raw_metrics["action_reroll_pct"] is not None:
         payload["Actions/6_Reroll_Shop_Pct"] = float(raw_metrics["action_reroll_pct"])
+    if "action_move_board_pct" in raw_metrics and raw_metrics["action_move_board_pct"] is not None:
+        payload["Actions/7_Move_Board_Pct"] = float(raw_metrics["action_move_board_pct"])
+    if "action_sell_bench_pct" in raw_metrics and raw_metrics["action_sell_bench_pct"] is not None:
+        payload["Actions/8_Sell_Bench_Pct"] = float(raw_metrics["action_sell_bench_pct"])
+    if "action_sell_board_pct" in raw_metrics and raw_metrics["action_sell_board_pct"] is not None:
+        payload["Actions/9_Sell_Board_Pct"] = float(raw_metrics["action_sell_board_pct"])
     # =========================================================================
     # SECTION 7: COMPOSITIONS & Z-INDEX MASTERY
     # =========================================================================

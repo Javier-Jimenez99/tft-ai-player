@@ -1,945 +1,970 @@
 <!DOCTYPE html>
-<html lang="es" class="dark">
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TFT AI Player — Portal de Modelos y Datos 24/7</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            tft: {
-              dark: '#080c14',
-              surface: '#0d1322',
-              card: '#121a2d',
-              border: '#1e293b',
-              accent: '#38bdf8',
-              gold: '#f59e0b',
-              emerald: '#10b981',
-              danger: '#ef4444',
-            }
-          }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TFT-AI Model Ecosystem Sanity & Benchmark Audit</title>
+    <style>
+        :root {
+            --bg-primary: #0b0f19;
+            --bg-secondary: #121a2d;
+            --bg-card: #18233c;
+            --border: #263554;
+            --text-main: #e2e8f0;
+            --text-dim: #94a3b8;
+            --accent: #3b82f6;
+            --pass-bg: #064e3b;
+            --pass-text: #34d399;
+            --warn-bg: #78350f;
+            --warn-text: #fbbf24;
+            --fail-bg: #7f1d1d;
+            --fail-text: #f87171;
         }
-      }
-    }
-  </script>
-  <style>
-    @keyframes pulse-slow {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
-    .pulse-indicator { animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-  </style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-main);
+            padding: 2rem;
+            line-height: 1.5;
+        }
+        .container {
+            max-width: 1300px;
+            margin: 0 auto;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 2rem;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 2rem;
+        }
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: #f8fafc;
+        }
+        .meta-info {
+            font-size: 0.875rem;
+            color: var(--text-dim);
+            margin-top: 0.25rem;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .stat-card {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1.25rem;
+        }
+        .stat-title {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-dim);
+            font-weight: 600;
+        }
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-top: 0.25rem;
+            color: #f8fafc;
+        }
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.65rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+        .badge-sm {
+            padding: 0.15rem 0.45rem;
+            font-size: 0.7rem;
+        }
+        .status-pass {
+            background-color: var(--pass-bg);
+            color: var(--pass-text);
+            border: 1px solid var(--pass-text);
+        }
+        .status-warn {
+            background-color: var(--warn-bg);
+            color: var(--warn-text);
+            border: 1px solid var(--warn-text);
+        }
+        .status-fail {
+            background-color: var(--fail-bg);
+            color: var(--fail-text);
+            border: 1px solid var(--fail-text);
+        }
+        .model-card {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 0.75rem;
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            cursor: pointer;
+            list-style: none;
+            padding: 1.25rem 1.5rem;
+        }
+        .card-header::-webkit-details-marker { display: none; }
+        .model-card[open] .card-header {
+            border-bottom: 1px solid var(--border);
+        }
+        .card-content { padding: 1.25rem 1.5rem 1.5rem; }
+        .summary-status { display: flex; align-items: center; gap: 0.75rem; }
+        .chevron { color: var(--text-dim); font-size: 1.5rem; transition: transform 0.15s ease; }
+        .model-card[open] .chevron { transform: rotate(90deg); }
+        .card-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #ffffff;
+        }
+        .card-subtitle {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            margin-top: 0.2rem;
+        }
+        .diagnosis-box {
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1.25rem;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+        .diag-fail {
+            background-color: rgba(127, 29, 29, 0.4);
+            border-left: 4px solid var(--fail-text);
+            color: #fecaca;
+        }
+        .diag-warn {
+            background-color: rgba(120, 53, 15, 0.4);
+            border-left: 4px solid var(--warn-text);
+            color: #fde68a;
+        }
+        .section-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--accent);
+            margin-bottom: 0.75rem;
+        }
+        .metrics-container {
+            margin-bottom: 1.25rem;
+        }
+        .metrics-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .metric-pill {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.35rem 0.75rem;
+            font-size: 0.85rem;
+            display: flex;
+            gap: 0.4rem;
+        }
+        .table-container {
+            overflow-x: auto;
+        }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.875rem;
+            text-align: left;
+        }
+        .data-table th {
+            background-color: var(--bg-card);
+            color: var(--text-dim);
+            padding: 0.75rem 1rem;
+            font-weight: 600;
+            border-bottom: 1px solid var(--border);
+        }
+        .data-table td {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid rgba(38, 53, 84, 0.5);
+            vertical-align: middle;
+        }
+        .data-table tr:hover {
+            background-color: rgba(24, 35, 60, 0.4);
+        }
+        .font-mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        }
+        .font-medium { font-weight: 500; }
+        .font-semibold { font-weight: 600; }
+        .text-dim { color: var(--text-dim); }
+        .text-sm { font-size: 0.8rem; }
+        .collector-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .collector-details {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 0.75rem;
+            padding: 1.25rem 1.5rem;
+        }
+        .collector-details summary {
+            cursor: pointer;
+            color: #ffffff;
+            font-weight: 600;
+            list-style: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .collector-details summary::-webkit-details-marker { display: none; }
+        .collector-details .table-container { margin-top: 1.25rem; }
+        .collector-details[open] .chevron { transform: rotate(90deg); }
+        @media (max-width: 640px) {
+            body { padding: 1rem; }
+            header { display: block; }
+            header > div:last-child { margin-top: 1rem; }
+            .card-header { padding: 1rem; }
+            .card-content { padding: 1rem; }
+        }
+    </style>
 </head>
-<body class="bg-[#080c14] text-slate-100 min-h-screen font-sans antialiased selection:bg-sky-500 selection:text-white">
-
-  <!-- Top Global Navigation Bar -->
-  <header class="border-b border-slate-800 bg-[#0d1322]/90 backdrop-blur-md sticky top-0 z-50">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-4">
-      
-      <!-- Brand & Project Title -->
-      <div class="flex items-center space-x-3">
-        <div class="h-10 w-10 rounded-xl bg-gradient-to-tr from-sky-500 via-indigo-600 to-amber-500 flex items-center justify-center shadow-lg shadow-sky-500/20 font-bold text-white text-xl">
-          ⚔️
-        </div>
-        <div>
-          <div class="flex items-center gap-2">
-            <h1 class="text-base sm:text-lg font-bold tracking-tight text-white">TFT AI Player</h1>
-            <span class="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30 font-mono font-bold">
-              v6.2 Platform
-            </span>
-          </div>
-          <p class="text-xs text-slate-400">Plataforma de Auditoría de Modelos y Monitor de Datos 24/7</p>
-        </div>
-      </div>
-
-      <!-- Navigation Tabs -->
-      <nav class="flex items-center gap-1 bg-[#121a2d] p-1 rounded-xl border border-slate-800 text-xs sm:text-sm">
-        <button id="nav-models" onclick="switchNavTab('models')" class="px-3.5 py-1.5 rounded-lg font-semibold transition-all bg-sky-600 text-white shadow-sm flex items-center gap-1.5">
-          <span>🔬</span> Auditoría de Modelos
-        </button>
-        <button id="nav-raspberry" onclick="switchNavTab('raspberry')" class="px-3.5 py-1.5 rounded-lg font-semibold transition-all text-slate-400 hover:text-white hover:bg-slate-800/60 flex items-center gap-1.5">
-          <span>🍓</span> Telemetría Colector (API)
-        </button>
-        <button id="nav-arch" onclick="switchNavTab('arch')" class="px-3.5 py-1.5 rounded-lg font-semibold transition-all text-slate-400 hover:text-white hover:bg-slate-800/60 flex items-center gap-1.5">
-          <span>🏛️</span> Arquitectura
-        </button>
-      </nav>
-
-      <!-- Quick External Links -->
-      <div class="hidden lg:flex items-center space-x-2 text-xs">
-        <a href="https://github.com/Javier-Jimenez99/tft-ai-player" target="_blank" class="text-slate-400 hover:text-white bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5">
-          <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
-          GitHub
-        </a>
-      </div>
-
-    </div>
-  </header>
-
-  <!-- ===================================================================== -->
-  <!-- TAB 1: MODEL AUDIT SUITE                                              -->
-  <!-- ===================================================================== -->
-  <main id="view-models" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-
-    <!-- Executive Summary Banner -->
-    <div class="bg-[#121a2d] border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-      <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-5 border-b border-slate-800 pb-5">
-        <div>
-          <div class="flex items-center gap-3">
-            <h2 class="text-2xl font-bold tracking-tight text-white">Auditoría Integral del Ecosistema de Modelos</h2>
-            <span class="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-rose-500/20 text-rose-400 border border-rose-500/30">
-              Salud: 42.8% (3/7 PASS)
-            </span>
-          </div>
-          <p class="text-slate-400 text-sm mt-1">
-            Evaluación empírica y determinista de los 7 modelos neuronales y auxiliares contra leyes físicas inviolables de TFT.
-          </p>
-        </div>
-        <div class="bg-amber-950/40 border border-amber-800/60 rounded-xl p-3 text-xs text-amber-200 max-w-md">
-          <span class="font-bold text-amber-400">Descubrimiento Crítico:</span> Los modelos de combate y evaluación sufrieron <em>Item Feature Collapse</em> (una mesa con 9 items gana sólo el <strong>51.4%</strong> contra 0 items).
-        </div>
-      </div>
-
-      <!-- KPI Grid -->
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5">
-        <div class="bg-[#0a0e17] border border-slate-800/80 rounded-xl p-4">
-          <div class="text-xs uppercase font-semibold text-slate-400">Modelos Auditados</div>
-          <div class="text-2xl font-bold font-mono text-white mt-1">7 Modelos</div>
-          <div class="text-xs text-slate-500 mt-0.5">Ecosistema Completo</div>
-        </div>
-        <div class="bg-[#0a0e17] border border-slate-800/80 rounded-xl p-4">
-          <div class="text-xs uppercase font-semibold text-emerald-400">Modelos Aprobados</div>
-          <div class="text-2xl font-bold font-mono text-emerald-400 mt-1">3 Modelos</div>
-          <div class="text-xs text-slate-500 mt-0.5">World Model, Centroids, ELO</div>
-        </div>
-        <div class="bg-[#0a0e17] border border-slate-800/80 rounded-xl p-4">
-          <div class="text-xs uppercase font-semibold text-rose-400">Modelos en Fallo</div>
-          <div class="text-2xl font-bold font-mono text-rose-400 mt-1">4 Modelos</div>
-          <div class="text-xs text-slate-500 mt-0.5">Trunk, Combate, Oráculo, Crítico</div>
-        </div>
-        <div class="bg-[#0a0e17] border border-slate-800/80 rounded-xl p-4">
-          <div class="text-xs uppercase font-semibold text-sky-400">Leyes Físicas Testeadas</div>
-          <div class="text-2xl font-bold font-mono text-sky-400 mt-1">24 Tests</div>
-          <div class="text-xs text-slate-500 mt-0.5">13 PASS / 11 Violaciones</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- The 7 Detailed Model Cards -->
-    <div class="space-y-6" id="model-cards-container">
-
-      <!-- 1. MultiModalFusionTrunk -->
-      <div class="bg-[#121a2d] border border-slate-800 rounded-2xl p-6 shadow-md">
-        <div class="flex justify-between items-start gap-4 border-b border-slate-800 pb-4">
-          <div>
-            <div class="flex items-center gap-3">
-              <h3 class="text-xl font-bold text-white">1. MultiModalFusionTrunk</h3>
-              <span class="px-2.5 py-0.5 rounded text-xs font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40">FAIL (1/3)</span>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>TFT-AI Model Ecosystem Sanity & Benchmark Audit</h1>
+                <div class="meta-info">
+                    Timestamp: <strong>2026-09-06T23:26:01Z</strong> | Device: <strong>cuda</strong> | Audit Runtime: <strong>6.51s</strong>
+                </div>
             </div>
-            <div class="text-xs font-mono text-slate-400 mt-1">Checkpoint: models/trunk/trunk_best.pt (Dimensión: 384D)</div>
-          </div>
-        </div>
-
-        <div class="grid md:grid-cols-2 gap-4 mt-4 text-sm">
-          <div class="bg-[#080c14] border border-slate-800 rounded-xl p-4">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-sky-400 mb-1">¿Qué hace este modelo?</h4>
-            <p class="text-slate-300 leading-relaxed text-xs sm:text-sm">
-              Es la columna vertebral de representación de todo el agente. Transforma los elementos discretos del juego (identidad de cada campeón, posición espacial en el tablero de 28 casillas, nivel de estrellas 1★-3★, objetos equipados y sinergias activas) en un vector denso continuo de 384 dimensiones.
-            </p>
-          </div>
-          <div class="bg-[#080c14] border border-slate-800 rounded-xl p-4">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-1">¿Por qué lo necesitamos?</h4>
-            <p class="text-slate-300 leading-relaxed text-xs sm:text-sm">
-              Porque los evaluadores de combate, el oráculo de posición (<code class="text-xs text-sky-300">BoardQualityNet</code>), el World Model y la política de RL no pueden procesar texto sin procesar. Necesitan una representación vectorial continua donde tableros con estrategias similares estén matemáticamente cerca.
-            </p>
-          </div>
-        </div>
-
-        <div class="bg-rose-950/30 border-l-4 border-rose-500 rounded-r-xl p-4 mt-4 text-xs sm:text-sm text-rose-200">
-          <strong>Diagnóstico del Fallo:</strong> Sufre de <em>Feature Collapse</em> en objetos. La similitud coseno entre un tablero con 9 objetos completos de meta y el mismo tablero desnudo con 0 objetos es de <strong>0.9641 (96.4% idénticos)</strong>. La atención espacial y las sinergias absorben prácticamente todo el gradiente, volviendo a los modelos posteriores ciegos ante los objetos.
-        </div>
-
-        <div class="mt-4 overflow-x-auto">
-          <table class="w-full text-left text-xs">
-            <thead class="bg-[#0a0e17] text-slate-400 border-b border-slate-800">
-              <tr>
-                <th class="p-2.5 font-semibold">Test de Ley Física</th>
-                <th class="p-2.5 font-semibold">Regla Esperada</th>
-                <th class="p-2.5 font-semibold">Medición Real</th>
-                <th class="p-2.5 font-semibold">Veredicto</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-800/60">
-              <tr>
-                <td class="p-2.5 font-medium">Separación de Campeones</td>
-                <td class="p-2.5 font-mono text-slate-400">cos_sim &lt; 0.850</td>
-                <td class="p-2.5 font-mono text-emerald-400 font-bold">cos_sim = 0.2428</td>
-                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">PASS</span></td>
-              </tr>
-              <tr>
-                <td class="p-2.5 font-medium">Monotonía de Estrellas (1★ &rarr; 2★ &rarr; 3★)</td>
-                <td class="p-2.5 font-mono text-slate-400">dist(1★, 2★) &lt; dist(1★, 3★)</td>
-                <td class="p-2.5 font-mono text-rose-400 font-bold">5.11 &lt; 3.79 (Invertido)</td>
-                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400">FAIL</span></td>
-              </tr>
-              <tr>
-                <td class="p-2.5 font-medium">Divergencia Vectorial por Items (9 items vs 0)</td>
-                <td class="p-2.5 font-mono text-slate-400">cos_sim &lt; 0.900</td>
-                <td class="p-2.5 font-mono text-rose-400 font-bold">cos_sim = 0.9641 (Casi idénticos)</td>
-                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400">FAIL</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- 2. DeepSiameseCombatNet -->
-      <div class="bg-[#121a2d] border border-slate-800 rounded-2xl p-6 shadow-md">
-        <div class="flex justify-between items-start gap-4 border-b border-slate-800 pb-4">
-          <div>
-            <div class="flex items-center gap-3">
-              <h3 class="text-xl font-bold text-white">2. DeepSiameseCombatNet (Resolutor de Combate)</h3>
-              <span class="px-2.5 py-0.5 rounded text-xs font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40">FAIL (4/6)</span>
+            <div>
+                <span class="badge status-fail" style="font-size: 1rem; padding: 0.5rem 1rem;">
+                    Ecosystem Health: 96.3%
+                </span>
             </div>
-            <div class="text-xs font-mono text-slate-400 mt-1">Checkpoint: models/round_winner/deep_siamese_combat_best.pt</div>
-          </div>
-        </div>
+        </header>
 
-        <div class="grid md:grid-cols-2 gap-4 mt-4 text-sm">
-          <div class="bg-[#080c14] border border-slate-800 rounded-xl p-4">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-sky-400 mb-1">¿Qué hace este modelo?</h4>
-            <p class="text-slate-300 leading-relaxed text-xs sm:text-sm">
-              Es el simulador neuronal de batallas 1v1. Toma las representaciones de dos tableros cualesquiera y predice la probabilidad de victoria \(P(\text{Gana A vs B}) = \sigma(\text{MLP}(z_A, z_B))\) y el daño en vida resultante.
-            </p>
-          </div>
-          <div class="bg-[#080c14] border border-slate-800 rounded-xl p-4">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-1">¿Por qué lo necesitamos?</h4>
-            <p class="text-slate-300 leading-relaxed text-xs sm:text-sm">
-              Riot Games no ofrece un motor de combate accesible por API para simular millones de rondas por segundo. Necesitamos un simulador en GPU ultra-rápido para que el RL pueda entrenar jugando miles de partidas contra las mesas reales de jugadores humanos de la ladder.
-            </p>
-          </div>
-        </div>
-
-        <div class="bg-rose-950/30 border-l-4 border-rose-500 rounded-r-xl p-4 mt-4 text-xs sm:text-sm text-rose-200">
-          <strong>Diagnóstico del Fallo:</strong> <strong>Fallo en la Ley de Ventaja de Objetos.</strong> Una mesa idéntica con 9 objetos completos de meta sólo tiene un <strong>51.47% de probabilidad de ganar</strong> contra la mesa desnuda sin ningún objeto. El agente de RL nunca aprendió a equipar items porque en este simulador ganaba prácticamente lo mismo jugando sin objetos.
-        </div>
-
-        <div class="mt-4 overflow-x-auto">
-          <table class="w-full text-left text-xs">
-            <thead class="bg-[#0a0e17] text-slate-400 border-b border-slate-800">
-              <tr>
-                <th class="p-2.5 font-semibold">Test de Ley Física</th>
-                <th class="p-2.5 font-semibold">Regla Esperada</th>
-                <th class="p-2.5 font-semibold">Medición Real</th>
-                <th class="p-2.5 font-semibold">Veredicto</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-800/60">
-              <tr>
-                <td class="p-2.5 font-medium">Identidad en Espejo (Mesa A vs Mesa A)</td>
-                <td class="p-2.5 font-mono text-slate-400">50.00% &plusmn; 2.0%</td>
-                <td class="p-2.5 font-mono text-emerald-400 font-bold">50.88%</td>
-                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">PASS</span></td>
-              </tr>
-              <tr>
-                <td class="p-2.5 font-medium">Dominancia por Tamaño (9 fichas vs 3 fichas)</td>
-                <td class="p-2.5 font-mono text-slate-400">&ge; 95.00%</td>
-                <td class="p-2.5 font-mono text-emerald-400 font-bold">96.10%</td>
-                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">PASS</span></td>
-              </tr>
-              <tr>
-                <td class="p-2.5 font-medium">Dominancia por Estrellas (Full 3★ vs Full 1★)</td>
-                <td class="p-2.5 font-mono text-slate-400">&ge; 90.00%</td>
-                <td class="p-2.5 font-mono text-emerald-400 font-bold">96.12%</td>
-                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">PASS</span></td>
-              </tr>
-              <tr>
-                <td class="p-2.5 font-medium">Dominancia por Coste (Full 4/5-costes vs 1-costes)</td>
-                <td class="p-2.5 font-mono text-slate-400">&ge; 75.00%</td>
-                <td class="p-2.5 font-mono text-emerald-400 font-bold">79.59%</td>
-                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">PASS</span></td>
-              </tr>
-              <tr>
-                <td class="p-2.5 font-medium">Ventaja de Items (9 items completos vs 0 items)</td>
-                <td class="p-2.5 font-mono text-slate-400">&ge; 80.00%</td>
-                <td class="p-2.5 font-mono text-rose-400 font-bold">51.47% (A cara o cruz)</td>
-                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400">FAIL</span></td>
-              </tr>
-              <tr>
-                <td class="p-2.5 font-medium">Antisimetría Matemática (P(A&gt;B) + P(B&gt;A))</td>
-                <td class="p-2.5 font-mono text-slate-400">100.00% &plusmn; 1.0%</td>
-                <td class="p-2.5 font-mono text-rose-400 font-bold">102.97% (Sesgo focal)</td>
-                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400">FAIL</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- 3. BoardQualityNet -->
-      <div class="bg-[#121a2d] border border-slate-800 rounded-2xl p-6 shadow-md">
-        <div class="flex justify-between items-start gap-4 border-b border-slate-800 pb-4">
-          <div>
-            <div class="flex items-center gap-3">
-              <h3 class="text-xl font-bold text-white">3. BoardQualityNet (Oráculo de Posición)</h3>
-              <span class="px-2.5 py-0.5 rounded text-xs font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40">FAIL (0/4)</span>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-title">Models Audited</div>
+                <div class="stat-value">7</div>
             </div>
-            <div class="text-xs font-mono text-slate-400 mt-1">Checkpoint: models/board_evaluator/board_quality_best.pt</div>
-          </div>
-        </div>
-
-        <div class="grid md:grid-cols-2 gap-4 mt-4 text-sm">
-          <div class="bg-[#080c14] border border-slate-800 rounded-xl p-4">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-sky-400 mb-1">¿Qué hace este modelo?</h4>
-            <p class="text-slate-300 leading-relaxed text-xs sm:text-sm">
-              Mapea el estado latente de un jugador al puesto final esperado en la partida (\(E[\text{Posición}] \in [1.0, 8.0]\)) y a la probabilidad de hacer Top-4 (\(P(\text{Top-4})\)).
-            </p>
-          </div>
-          <div class="bg-[#080c14] border border-slate-800 rounded-xl p-4">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-1">¿Por qué lo necesitamos?</h4>
-            <p class="text-slate-300 leading-relaxed text-xs sm:text-sm">
-              En el árbol de decisión (<code class="text-xs text-sky-300">ShopBeamSearchPlanner</code>), cuando el bot simula compras y ventas, necesita saber cuál de los tableros candidatos conducirá a una mejor posición final de partida para elegir las mejores ramas.
-            </p>
-          </div>
-        </div>
-
-        <div class="bg-rose-950/30 border-l-4 border-rose-500 rounded-r-xl p-4 mt-4 text-xs sm:text-sm text-rose-200">
-          <strong>Diagnóstico del Fallo:</strong> <strong>Saturación severa a puestos ganadores.</strong> Fue entrenado casi en exclusiva con partidas del Top-1 al Top-4. Predice prácticamente lo mismo (puesto 1.30 a 2.00) tanto para una mesa débil como para una mesa capped, y predice exactamente la misma posición con o sin objetos (diferencia de solo <strong>-0.02 puestos</strong>).
-        </div>
-
-        <div class="mt-4 overflow-x-auto">
-          <table class="w-full text-left text-xs">
-            <thead class="bg-[#0a0e17] text-slate-400 border-b border-slate-800">
-              <tr>
-                <th class="p-2.5 font-semibold">Test de Ley Física</th>
-                <th class="p-2.5 font-semibold">Regla Esperada</th>
-                <th class="p-2.5 font-semibold">Medición Real</th>
-                <th class="p-2.5 font-semibold">Veredicto</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-800/60">
-              <tr>
-                <td class="p-2.5 font-medium">Separación Capped vs Débil (Nivel 9 vs 5)</td>
-                <td class="p-2.5 font-mono text-slate-400">&ge; +2.00 puestos dif.</td>
-                <td class="p-2.5 font-mono text-rose-400 font-bold">+0.69 puestos (1.30 vs 2.00)</td>
-                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400">FAIL</span></td>
-              </tr>
-              <tr>
-                <td class="p-2.5 font-medium">Beneficio de Subida de Estrellas (3★ vs 1★)</td>
-                <td class="p-2.5 font-mono text-slate-400">&ge; +0.50 puestos dif.</td>
-                <td class="p-2.5 font-mono text-rose-400 font-bold">+0.30 puestos (1.77 vs 1.48)</td>
-                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400">FAIL</span></td>
-              </tr>
-              <tr>
-                <td class="p-2.5 font-medium">Beneficio de Equipación (9 items vs 0)</td>
-                <td class="p-2.5 font-mono text-slate-400">&ge; +0.40 puestos dif.</td>
-                <td class="p-2.5 font-mono text-rose-400 font-bold">+0.02 puestos (1.61 vs 1.59)</td>
-                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400">FAIL</span></td>
-              </tr>
-              <tr>
-                <td class="p-2.5 font-medium">Sensibilidad al Buffer de Vida (100 HP vs 12 HP)</td>
-                <td class="p-2.5 font-mono text-slate-400">&ge; +10.0% dif. Top-4</td>
-                <td class="p-2.5 font-mono text-rose-400 font-bold">+5.5% (100% vs 94.5%)</td>
-                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400">FAIL</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- 4. StateTransitionPredictor -->
-      <div class="bg-[#121a2d] border border-slate-800 rounded-2xl p-6 shadow-md">
-        <div class="flex justify-between items-start gap-4 border-b border-slate-800 pb-4">
-          <div>
-            <div class="flex items-center gap-3">
-              <h3 class="text-xl font-bold text-white">4. StateTransitionPredictor (World Model)</h3>
-              <span class="px-2.5 py-0.5 rounded text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">PASS (3/3)</span>
+            <div class="stat-card">
+                <div class="stat-title">Axiomatic Tests Executed</div>
+                <div class="stat-value">27</div>
             </div>
-            <div class="text-xs font-mono text-slate-400 mt-1">Checkpoint: models/transition_predictor/predictor_best.pt</div>
-          </div>
-        </div>
-
-        <div class="grid md:grid-cols-2 gap-4 mt-4 text-sm">
-          <div class="bg-[#080c14] border border-slate-800 rounded-xl p-4">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-sky-400 mb-1">¿Qué hace este modelo?</h4>
-            <p class="text-slate-300 leading-relaxed text-xs sm:text-sm">
-              Predice la evolución del estado latente para la siguiente ronda (\(\hat{s}_{t+1} = f(s_t, a_t)\)) mediante un MLP residual de 3 capas.
-            </p>
-          </div>
-          <div class="bg-[#080c14] border border-slate-800 rounded-xl p-4">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-1">¿Por qué lo necesitamos?</h4>
-            <p class="text-slate-300 leading-relaxed text-xs sm:text-sm">
-              Permite hacer lookahead multi-turno en el árbol de búsqueda sin necesidad de simular completamente el motor del juego, proyectando el estado del jugador hacia el futuro.
-            </p>
-          </div>
-        </div>
-
-        <div class="bg-emerald-950/30 border-l-4 border-emerald-500 rounded-r-xl p-4 mt-4 text-xs sm:text-sm text-emerald-200">
-          <strong>Veredicto:</strong> <strong>100% Estable y Operativo.</strong> No colapsa a la identidad (\(\Delta = 0.478\)) y mantiene la norma perfectamente acotada (\(0.986\times\)) tras 5 pasos autorregresivos recursivos.
-        </div>
-      </div>
-
-      <!-- 5. Z-Index Centroids -->
-      <div class="bg-[#121a2d] border border-slate-800 rounded-2xl p-6 shadow-md">
-        <div class="flex justify-between items-start gap-4 border-b border-slate-800 pb-4">
-          <div>
-            <div class="flex items-center gap-3">
-              <h3 class="text-xl font-bold text-white">5. Z-Index Centroids (Macro Arquetipos)</h3>
-              <span class="px-2.5 py-0.5 rounded text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">PASS (2/2)</span>
+            <div class="stat-card">
+                <div class="stat-title">Tests Passed</div>
+                <div class="stat-value" style="color: var(--pass-text);">26</div>
             </div>
-            <div class="text-xs font-mono text-slate-400 mt-1">Checkpoint: models/clustering/z_index.pt (k=8, Dim=256D)</div>
-          </div>
-        </div>
-
-        <div class="grid md:grid-cols-2 gap-4 mt-4 text-sm">
-          <div class="bg-[#080c14] border border-slate-800 rounded-xl p-4">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-sky-400 mb-1">¿Qué hace este modelo?</h4>
-            <p class="text-slate-300 leading-relaxed text-xs sm:text-sm">
-              Son 8 centroides vectoriales en el espacio latente que resumen las composiciones canónicas de meta de Set 18 obtenidas por clustering K-Means sobre miles de partidas de Challenger.
-            </p>
-          </div>
-          <div class="bg-[#080c14] border border-slate-800 rounded-xl p-4">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-1">¿Por qué lo necesitamos?</h4>
-            <p class="text-slate-300 leading-relaxed text-xs sm:text-sm">
-              Proporciona al agente de RL un objetivo macro (Macro Target \(z\)). En lugar de jugar fichas inconexas, el agente recibe una recompensa por alinear su tablero con el centroide de la composición hacia la que transiciona.
-            </p>
-          </div>
-        </div>
-
-        <div class="bg-emerald-950/30 border-l-4 border-emerald-500 rounded-r-xl p-4 mt-4 text-xs sm:text-sm text-emerald-200">
-          <strong>Veredicto:</strong> <strong>Arquetipos Totalmente Ortogonales.</strong> La similitud máxima entre cualquier par de centroides es de solo <strong>0.486</strong> (con una media de -0.135). Cada centroide representa un estilo genuinamente diferente.
-        </div>
-      </div>
-
-      <!-- 6. EloRegressor -->
-      <div class="bg-[#121a2d] border border-slate-800 rounded-2xl p-6 shadow-md">
-        <div class="flex justify-between items-start gap-4 border-b border-slate-800 pb-4">
-          <div>
-            <div class="flex items-center gap-3">
-              <h3 class="text-xl font-bold text-white">6. EloRegressor & Detector OOD</h3>
-              <span class="px-2.5 py-0.5 rounded text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">PASS (1/1)</span>
+            <div class="stat-card">
+                <div class="stat-title">Critical Law Violations</div>
+                <div class="stat-value" style="color: var(--fail-text);">1</div>
             </div>
-            <div class="text-xs font-mono text-slate-400 mt-1">Checkpoint: models/elo_predictor/elo_regressor_player_level.pkl</div>
-          </div>
         </div>
 
-        <div class="grid md:grid-cols-2 gap-4 mt-4 text-sm">
-          <div class="bg-[#080c14] border border-slate-800 rounded-xl p-4">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-sky-400 mb-1">¿Qué hace este modelo?</h4>
-            <p class="text-slate-300 leading-relaxed text-xs sm:text-sm">
-              Regresor de gradiente boosting que predice la puntuación ELO competitiva a partir de las estadísticas de la partida, combinado con un One-Class SVM que detecta si el bot juega como un humano o tiene un comportamiento fuera de distribución (OOD).
-            </p>
-          </div>
-          <div class="bg-[#080c14] border border-slate-800 rounded-xl p-4">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-1">¿Por qué lo necesitamos?</h4>
-            <p class="text-slate-300 leading-relaxed text-xs sm:text-sm">
-              Permite auditar de forma objetiva qué nivel de juego competitivo está exhibiendo el agente y asegura que no desarrolle tácticas degeneradas imposibles en humanos.
-            </p>
-          </div>
-        </div>
-      </div>
+        <section class="collector-grid" aria-label="Data collection status">
+            <div class="stat-card"><div class="stat-title">Collector Status</div><div class="stat-value">Starting</div></div>
+            <div class="stat-card"><div class="stat-title">Matches on Disk</div><div class="stat-value">710</div></div>
+            <div class="stat-card"><div class="stat-title">Download Rate</div><div class="stat-value">0.0/h</div></div>
+            <div class="stat-card"><div class="stat-title">Status Updated</div><div class="stat-value" style="font-size: 1rem;">2026-09-06T09:17:35.553079+00:00</div></div>
+        </section>
 
-      <!-- 7. TFTActorCritic -->
-      <div class="bg-[#121a2d] border border-slate-800 rounded-2xl p-6 shadow-md">
-        <div class="flex justify-between items-start gap-4 border-b border-slate-800 pb-4">
-          <div>
-            <div class="flex items-center gap-3">
-              <h3 class="text-xl font-bold text-white">7. TFTActorCritic (AlphaStar v6 RL Agent)</h3>
-              <span class="px-2.5 py-0.5 rounded text-xs font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40">FAIL (2/4)</span>
-            </div>
-            <div class="text-xs font-mono text-slate-400 mt-1">Checkpoint: ppo_alphastar_v6/gen_0300/training_state.pt</div>
-          </div>
-        </div>
-
-        <div class="grid md:grid-cols-2 gap-4 mt-4 text-sm">
-          <div class="bg-[#080c14] border border-slate-800 rounded-xl p-4">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-sky-400 mb-1">¿Qué hace este modelo?</h4>
-            <p class="text-slate-300 leading-relaxed text-xs sm:text-sm">
-              Es el cerebro que toma decisiones en cada frame: el Actor selecciona una de las 111 acciones discretas legales, y el Crítico (\(V(s)\)) estima el retorno acumulado esperado para calcular ventajas GAE en PPO.
-            </p>
-          </div>
-          <div class="bg-[#080c14] border border-slate-800 rounded-xl p-4">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-1">¿Por qué lo necesitamos?</h4>
-            <p class="text-slate-300 leading-relaxed text-xs sm:text-sm">
-              Es el modelo central de aprendizaje por refuerzo que estamos entrenando para subir la ranked ladder de TFT.
-            </p>
-          </div>
-        </div>
-
-        <div class="bg-rose-950/30 border-l-4 border-rose-500 rounded-r-xl p-4 mt-4 text-xs sm:text-sm text-rose-200">
-          <strong>Diagnóstico del Fallo:</strong> <strong>Inversión en el Crítico para Items y Tamaño de Mesa.</strong> A igualdad de vida (70 HP) y campeones, el Crítico predice un valor <strong>ligeramente inferior (\(-0.0374\))</strong> para una mesa con 9 items que para una mesa sin items. Además, valora una mesa de 3 unidades por encima de una de 9 unidades (+8.61 vs +7.75).
-        </div>
-
-        <div class="mt-4 overflow-x-auto">
-          <table class="w-full text-left text-xs">
-            <thead class="bg-[#0a0e17] text-slate-400 border-b border-slate-800">
-              <tr>
-                <th class="p-2.5 font-semibold">Test de Ley Física</th>
-                <th class="p-2.5 font-semibold">Regla Esperada</th>
-                <th class="p-2.5 font-semibold">Medición Real</th>
-                <th class="p-2.5 font-semibold">Veredicto</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-800/60">
-              <tr>
-                <td class="p-2.5 font-medium">Cumplimiento de Máscara de Acciones</td>
-                <td class="p-2.5 font-mono text-slate-400">P(Inválidas) == 0.0000</td>
-                <td class="p-2.5 font-mono text-emerald-400 font-bold">0.00000000</td>
-                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">PASS</span></td>
-              </tr>
-              <tr>
-                <td class="p-2.5 font-medium">Monotonía con la Vida (100 HP vs 12 HP)</td>
-                <td class="p-2.5 font-mono text-slate-400">V(100 HP) &gt; V(12 HP)</td>
-                <td class="p-2.5 font-mono text-emerald-400 font-bold">&Delta; = +3.23 (+9.65 vs +6.42)</td>
-                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">PASS</span></td>
-              </tr>
-              <tr>
-                <td class="p-2.5 font-medium">Monotonía con el Tamaño de Mesa (9 vs 3 unidades)</td>
-                <td class="p-2.5 font-mono text-slate-400">V(9 Unidades) &gt; V(3 Unidades)</td>
-                <td class="p-2.5 font-mono text-rose-400 font-bold">&Delta; = -0.86 (+7.75 vs +8.61)</td>
-                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400">FAIL</span></td>
-              </tr>
-              <tr>
-                <td class="p-2.5 font-medium">Sensibilidad del Crítico a Items (9 items vs 0)</td>
-                <td class="p-2.5 font-mono text-slate-400">V(9 Items) &gt; V(0 Items) + 0.10</td>
-                <td class="p-2.5 font-mono text-rose-400 font-bold">&Delta; = -0.0374 (Invertido)</td>
-                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400">FAIL</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-    </div>
-  </main>
-
-  <!-- ===================================================================== -->
-  <!-- TAB 2: RASPBERRY PI COLLECTOR MONITOR                                 -->
-  <!-- ===================================================================== -->
-  <main id="view-raspberry" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6 hidden">
-
-    <!-- Raspberry Pi Header & Live Status -->
-    <div class="bg-[#121a2d] border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-wrap items-center justify-between gap-4">
-      <div class="flex items-center space-x-3">
-        <div class="h-10 w-10 rounded-xl bg-gradient-to-tr from-rose-500 to-red-600 flex items-center justify-center shadow-lg shadow-red-500/20 text-white text-xl">
-          🍓
-        </div>
-        <div>
-          <div class="flex items-center gap-2">
-            <h2 class="text-lg font-bold text-white">Telemetría del Colector 24/7 (API Backend)</h2>
-            <span id="rpi-service-badge" class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
-              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-indicator"></span>
-              API Backend Activa (Puerto 8080)
-            </span>
-          </div>
-          <p class="text-xs text-slate-400">Consumiendo en tiempo real la API REST expuesta directamente por el daemon de la Raspberry Pi</p>
-        </div>
-      </div>
-
-      <div class="flex items-center space-x-3 text-xs">
-        <div class="flex items-center space-x-1.5 bg-purple-950/40 border border-purple-800/50 rounded-lg px-3 py-1.5 text-slate-300">
-          <span class="text-purple-400">🌐 Túnel Cloudflare:</span>
-          <a id="rpi-tunnel-link" href="https://without-fly-privileges-lots.trycloudflare.com" target="_blank" class="font-mono font-medium text-purple-300 hover:text-purple-200 underline truncate max-w-[200px]">Activo</a>
-        </div>
-        <div class="flex items-center space-x-1.5 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-slate-300">
-          <span class="text-slate-400">Actualizado:</span>
-          <span id="rpi-last-updated" class="font-mono font-medium text-slate-200">En Vivo</span>
-        </div>
-        <button onclick="refreshPiData()" class="bg-sky-600 hover:bg-sky-500 text-white font-medium px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 shadow-md shadow-sky-600/20">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-          Sincronizar
-        </button>
-      </div>
-    </div>
-
-    <!-- 7 KPI Summary Cards -->
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3.5">
-      <div class="bg-[#121a2d] border border-slate-800 rounded-xl p-4 shadow-sm relative overflow-hidden">
-        <p class="text-xs font-medium text-slate-400">Partidas en Disco</p>
-        <p id="kpi-total-matches" class="text-2xl font-bold font-mono text-white mt-1">14,017</p>
-        <p id="kpi-session-dl" class="text-[11px] text-emerald-400 font-medium mt-1">+3,061 en sesión</p>
-      </div>
-      <div class="bg-[#121a2d] border border-slate-800 rounded-xl p-4 shadow-sm relative overflow-hidden">
-        <p class="text-xs font-medium text-slate-400">Partidas Top 1</p>
-        <p id="kpi-top1" class="text-2xl font-bold font-mono text-amber-400 mt-1">1,934</p>
-        <p class="text-[11px] text-amber-300/80 font-medium mt-1">13.8% victorias</p>
-      </div>
-      <div class="bg-[#121a2d] border border-slate-800 rounded-xl p-4 shadow-sm relative overflow-hidden">
-        <p class="text-xs font-medium text-slate-400">Velocidad</p>
-        <p id="kpi-rate" class="text-2xl font-bold font-mono text-white mt-1">1,105</p>
-        <p class="text-[11px] text-slate-500 font-medium mt-1">partidas / hora</p>
-      </div>
-      <div class="bg-[#121a2d] border border-slate-800 rounded-xl p-4 shadow-sm relative overflow-hidden">
-        <p class="text-xs font-medium text-slate-400">Uptime Pi</p>
-        <p id="kpi-uptime" class="text-2xl font-bold font-mono text-white mt-1">2.8h</p>
-        <p class="text-[11px] text-slate-500 font-medium mt-1">9,972 seg</p>
-      </div>
-      <div class="bg-[#121a2d] border border-slate-800 rounded-xl p-4 shadow-sm relative overflow-hidden">
-        <p class="text-xs font-medium text-slate-400">Temp CPU</p>
-        <p id="kpi-temp" class="text-2xl font-bold font-mono text-amber-400 mt-1">76.4°C</p>
-        <p class="text-[11px] text-slate-500 font-medium mt-1">ARM Cortex-A72</p>
-      </div>
-      <div class="bg-[#121a2d] border border-slate-800 rounded-xl p-4 shadow-sm relative overflow-hidden">
-        <p class="text-xs font-medium text-slate-400">Uso RAM</p>
-        <p id="kpi-ram" class="text-2xl font-bold font-mono text-white mt-1">5.7%</p>
-        <p class="text-[11px] text-slate-500 font-medium mt-1">Ligero (&lt;30MB)</p>
-      </div>
-      <div class="bg-[#121a2d] border border-slate-800 rounded-xl p-4 shadow-sm relative overflow-hidden">
-        <p class="text-xs font-medium text-slate-400">MicroSD Libre</p>
-        <p id="kpi-disk" class="text-2xl font-bold font-mono text-emerald-400 mt-1">49.5 GB</p>
-        <p class="text-[11px] text-slate-500 font-medium mt-1">de 58.0 GB total</p>
-      </div>
-    </div>
-
-    <!-- Charts Section -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      
-      <!-- Main Distribution Bar Chart -->
-      <div class="lg:col-span-2 bg-[#121a2d] border border-slate-800 rounded-2xl p-5 shadow-sm">
-        <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
-          <div>
-            <h3 class="text-base font-bold text-white">Distribución de Partidas por Liga</h3>
-            <p class="text-xs text-slate-400">Comparativa de cuota real descargada vs objetivo de balance</p>
-          </div>
-        </div>
-        <div class="h-64">
-          <canvas id="rpiTiersChart"></canvas>
-        </div>
-      </div>
-
-      <!-- Donut Pending Games Chart -->
-      <div class="bg-[#121a2d] border border-slate-800 rounded-2xl p-5 shadow-sm">
-        <h3 class="text-base font-bold text-white mb-1">Partidas Pendientes</h3>
-        <p class="text-xs text-slate-400 mb-4">Cola indexada en SQLite por liga</p>
-        <div class="h-56 relative flex items-center justify-center">
-          <canvas id="rpiPendingChart"></canvas>
-        </div>
-        <p class="text-center text-xs text-slate-400 mt-2">140k+ partidas en cola listas para descargar</p>
-      </div>
-    </div>
-
-    <!-- Tier Table -->
-    <div class="bg-[#121a2d] border border-slate-800 rounded-2xl p-5 shadow-sm overflow-hidden">
-      <h3 class="text-base font-bold text-white mb-1">Balance Detallado por Ligas</h3>
-      <p class="text-xs text-slate-400 mb-4">Métricas de progreso de la ingesta</p>
-      
-      <div class="overflow-x-auto">
-        <table class="w-full text-left text-xs">
-          <thead class="bg-[#0a0e17] text-slate-400 border-b border-slate-800">
+        <details class="collector-details">
+            <summary>Collector Distribution by Tier <span class="chevron" aria-hidden="true">&#8250;</span></summary>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead><tr><th>Tier</th><th>Downloaded</th><th>Pending Games</th><th>Unscanned Players</th><th>Current Share</th><th>Target Share</th></tr></thead>
+                    <tbody>
             <tr>
-              <th class="p-2.5 font-semibold">Liga</th>
-              <th class="p-2.5 font-semibold">Descargadas</th>
-              <th class="p-2.5 font-semibold">En Cola</th>
-              <th class="p-2.5 font-semibold">% Actual</th>
-              <th class="p-2.5 font-semibold">% Objetivo</th>
-              <th class="p-2.5 font-semibold">Déficit</th>
+                <td class="font-medium">CHALLENGER</td>
+                <td class="font-mono">30</td>
+                <td class="font-mono">311</td>
+                <td class="font-mono">8</td>
+                <td class="font-mono">4.2%</td>
+                <td class="font-mono">10.0%</td>
             </tr>
-          </thead>
-          <tbody id="rpi-tier-table-body" class="divide-y divide-slate-800/60 font-mono">
-            <!-- Dynamic Injection -->
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-  </main>
-
-  <!-- ===================================================================== -->
-  <!-- TAB 3: SYSTEM ARCHITECTURE                                            -->
-  <!-- ===================================================================== -->
-  <main id="view-arch" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6 hidden">
-
-    <div class="bg-[#121a2d] border border-slate-800 rounded-2xl p-6 shadow-xl">
-      <h2 class="text-2xl font-bold text-white mb-2">Arquitectura End-to-End de TFT-AI Player</h2>
-      <p class="text-slate-400 text-sm mb-6">
-        Cómo interactúan la Raspberry Pi, el pipeline de representación latente, los modelos auxiliares y el agente de Aprendizaje por Refuerzo en la Ladder.
-      </p>
-
-      <div class="grid md:grid-cols-3 gap-5 text-sm">
         
-        <!-- Step 1 -->
-        <div class="bg-[#080c14] border border-slate-800 rounded-xl p-5 relative">
-          <div class="text-xs font-bold font-mono text-sky-400 uppercase mb-1">Fase 1 • Colector Headless + API</div>
-          <h3 class="text-base font-bold text-white mb-2">Raspberry Pi 24/7 (Sin Web Local)</h3>
-          <p class="text-xs text-slate-300 leading-relaxed">
-            Un único servicio daemon corre 24/7 en la Raspberry Pi descargando partidas e indexándolas en SQLite. <strong>No alberga ningún frontend HTML local</strong>: únicamente levanta una micro-API REST en el puerto 8080 (<code class="text-sky-300 text-[11px]">/api/status</code>, <code class="text-sky-300 text-[11px]">/api/recent</code>) que este portal en GitHub Pages consume en tiempo real.
-          </p>
-        </div>
+            <tr>
+                <td class="font-medium">GRANDMASTER</td>
+                <td class="font-mono">89</td>
+                <td class="font-mono">1950</td>
+                <td class="font-mono">17</td>
+                <td class="font-mono">12.5%</td>
+                <td class="font-mono">15.0%</td>
+            </tr>
+        
+            <tr>
+                <td class="font-medium">MASTER</td>
+                <td class="font-mono">96</td>
+                <td class="font-mono">4896</td>
+                <td class="font-mono">10</td>
+                <td class="font-mono">13.5%</td>
+                <td class="font-mono">20.0%</td>
+            </tr>
+        
+            <tr>
+                <td class="font-medium">DIAMOND</td>
+                <td class="font-mono">99</td>
+                <td class="font-mono">12403</td>
+                <td class="font-mono">62</td>
+                <td class="font-mono">13.9%</td>
+                <td class="font-mono">18.0%</td>
+            </tr>
+        
+            <tr>
+                <td class="font-medium">EMERALD</td>
+                <td class="font-mono">85</td>
+                <td class="font-mono">16873</td>
+                <td class="font-mono">554</td>
+                <td class="font-mono">12.0%</td>
+                <td class="font-mono">14.0%</td>
+            </tr>
+        
+            <tr>
+                <td class="font-medium">PLATINUM</td>
+                <td class="font-mono">84</td>
+                <td class="font-mono">14114</td>
+                <td class="font-mono">119</td>
+                <td class="font-mono">11.8%</td>
+                <td class="font-mono">10.0%</td>
+            </tr>
+        
+            <tr>
+                <td class="font-medium">GOLD</td>
+                <td class="font-mono">117</td>
+                <td class="font-mono">4376</td>
+                <td class="font-mono">0</td>
+                <td class="font-mono">16.5%</td>
+                <td class="font-mono">6.0%</td>
+            </tr>
+        
+            <tr>
+                <td class="font-medium">SILVER</td>
+                <td class="font-mono">87</td>
+                <td class="font-mono">892</td>
+                <td class="font-mono">0</td>
+                <td class="font-mono">12.3%</td>
+                <td class="font-mono">4.0%</td>
+            </tr>
+        
+            <tr>
+                <td class="font-medium">BRONZE</td>
+                <td class="font-mono">23</td>
+                <td class="font-mono">196</td>
+                <td class="font-mono">0</td>
+                <td class="font-mono">3.2%</td>
+                <td class="font-mono">2.0%</td>
+            </tr>
+        
+            <tr>
+                <td class="font-medium">IRON</td>
+                <td class="font-mono">0</td>
+                <td class="font-mono">19</td>
+                <td class="font-mono">0</td>
+                <td class="font-mono">0.0%</td>
+                <td class="font-mono">1.0%</td>
+            </tr>
+        </tbody>
+                </table>
+            </div>
+        </details>
 
-        <!-- Step 2 -->
-        <div class="bg-[#080c14] border border-slate-800 rounded-xl p-5 relative">
-          <div class="text-xs font-bold font-mono text-indigo-400 uppercase mb-1">Fase 2 • Modelos Auxiliares</div>
-          <h3 class="text-base font-bold text-white mb-2">Trunk, Oráculo & Combate</h3>
-          <p class="text-xs text-slate-300 leading-relaxed">
-            Los datos entrenan el <strong>MultiModalFusionTrunk</strong> (espacio latente 384D), el <strong>DeepSiameseCombatNet</strong> (simulador GPU de batallas), el <strong>BoardQualityNet</strong> (oráculo de puestos) y el <strong>StateTransitionPredictor</strong> (física del juego).
-          </p>
-        </div>
+        
+            <details class="model-card">
+                <summary class="card-header">
+                    <div>
+                        <h2 class="card-title">MultiModalFusionTrunk</h2>
+                        <div class="card-subtitle font-mono">Checkpoint: models/trunk/trunk_best.pt</div>
+                    </div>
+                    <div class="summary-status"><span class="badge status-pass">PASS</span><span class="chevron" aria-hidden="true">&#8250;</span></div>
+                </summary>
+                <div class="card-content">
+                    
+                    
+            <div class="metrics-container">
+                <div class="section-title">Model Metrics</div>
+                <div class="metrics-grid"><div class="metric-pill"><span class="text-dim">Tests passed:</span><span class="font-mono font-semibold">3/3</span></div><div class="metric-pill"><span class="text-dim">Audit status:</span><span class="font-mono font-semibold">PASS</span></div>
+                <div class="metric-pill">
+                    <span class="text-dim">Champ embed norm:</span>
+                    <span class="font-mono font-semibold">126.55</span>
+                </div>
+            
+                <div class="metric-pill">
+                    <span class="text-dim">Star embed norm:</span>
+                    <span class="font-mono font-semibold">5.44</span>
+                </div>
+            
+                <div class="metric-pill">
+                    <span class="text-dim">Item embed norm:</span>
+                    <span class="font-mono font-semibold">96.6</span>
+                </div>
+            
+                <div class="metric-pill">
+                    <span class="text-dim">Item embed std:</span>
+                    <span class="font-mono font-semibold">0.9843</span>
+                </div>
+            
+                <div class="metric-pill">
+                    <span class="text-dim">Fused dim:</span>
+                    <span class="font-mono font-semibold">384</span>
+                </div>
+            </div>
+            </div>
+        
+                    <div class="table-container">
+                        <div class="section-title">Deterministic TFT Law Tests</div>
+                        <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Test Name</th>
+                                <th>Description</th>
+                                <th>Physical TFT Law</th>
+                                <th>Expected</th>
+                                <th>Actual Measured</th>
+                                <th>Verdict</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            
+                <tr>
+                    <td class="font-medium">Champion Distinction Law</td>
+                    <td class="text-dim text-sm">Different champions must have separated embedding vectors in Champ2Vec</td>
+                    <td class="font-mono text-sm">cos_sim(champ_i, champ_j) &lt; 0.85</td>
+                    <td class="font-mono text-sm">&lt; 0.850</td>
+                    <td class="font-mono text-sm font-semibold">-0.0318</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Star Progression Monotonicity</td>
+                    <td class="text-dim text-sm">Upgrades must progress along the star embedding manifold</td>
+                    <td class="font-mono text-sm">dist(1*, 2*) &lt; dist(1*, 3*)</td>
+                    <td class="font-mono text-sm">d(1,2) &lt; d(1,3) (actual: 1.27 vs 2.39)</td>
+                    <td class="font-mono text-sm font-semibold">1.27 &lt; 2.39</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Item Vector Divergence Law</td>
+                    <td class="text-dim text-sm">A board with 9 completed items must cause significant vector separation from 0 items</td>
+                    <td class="font-mono text-sm">cos_sim(h_no_items, h_full_items) &lt; 0.90</td>
+                    <td class="font-mono text-sm">&lt; 0.900</td>
+                    <td class="font-mono text-sm font-semibold">cos_sim = 0.8279 (dist = 3.70)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                        </tbody>
+                        </table>
+                    </div>
+                </div>
+            </details>
+        
 
-        <!-- Step 3 -->
-        <div class="bg-[#080c14] border border-slate-800 rounded-xl p-5 relative">
-          <div class="text-xs font-bold font-mono text-emerald-400 uppercase mb-1">Fase 3 • RL en Ranked Ladder</div>
-          <h3 class="text-base font-bold text-white mb-2">AlphaStar v6.2 + Árbol</h3>
-          <p class="text-xs text-slate-300 leading-relaxed">
-            El agente de PPO aprende jugando en el <strong>RankedLadderEnv</strong>. El árbol de decisión planifica las tiendas óptimas y el agente asciende de rango (Bronce &rarr; Challenger) acumulando LP contra rivales humanos reales.
-          </p>
-        </div>
+            <details class="model-card">
+                <summary class="card-header">
+                    <div>
+                        <h2 class="card-title">DeepSiameseCombatNet</h2>
+                        <div class="card-subtitle font-mono">Checkpoint: models\round_winner\deep_siamese_combat_best.pt</div>
+                    </div>
+                    <div class="summary-status"><span class="badge status-pass">PASS</span><span class="chevron" aria-hidden="true">&#8250;</span></div>
+                </summary>
+                <div class="card-content">
+                    
+                <div class="diagnosis-box diag-warn">
+                    <strong>Diagnosis & Root Cause:</strong> All combat sanity laws passed.
+                </div>
+            
+                    
+            <div class="metrics-container">
+                <div class="section-title">Model Metrics</div>
+                <div class="metrics-grid"><div class="metric-pill"><span class="text-dim">Tests passed:</span><span class="font-mono font-semibold">6/6</span></div><div class="metric-pill"><span class="text-dim">Audit status:</span><span class="font-mono font-semibold">PASS</span></div>
+                <div class="metric-pill">
+                    <span class="text-dim">Replay samples evaluated:</span>
+                    <span class="font-mono font-semibold">90</span>
+                </div>
+            
+                <div class="metric-pill">
+                    <span class="text-dim">Mean win probability vs human boards:</span>
+                    <span class="font-mono font-semibold">80.17%</span>
+                </div>
+            
+                <div class="metric-pill">
+                    <span class="text-dim">Std win probability:</span>
+                    <span class="font-mono font-semibold">14.90%</span>
+                </div>
+            </div>
+            </div>
+        
+                    <div class="table-container">
+                        <div class="section-title">Deterministic TFT Law Tests</div>
+                        <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Test Name</th>
+                                <th>Description</th>
+                                <th>Physical TFT Law</th>
+                                <th>Expected</th>
+                                <th>Actual Measured</th>
+                                <th>Verdict</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            
+                <tr>
+                    <td class="font-medium">Mirror Match Identity Law</td>
+                    <td class="text-dim text-sm">P(Board A beats Board A) must strictly evaluate to 50.0%</td>
+                    <td class="font-mono text-sm">|P(A vs A) - 50.0%| &lt;= 2.0%</td>
+                    <td class="font-mono text-sm">50.00% +/- 2.0%</td>
+                    <td class="font-mono text-sm font-semibold">50.00%</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Anti-Symmetry Law</td>
+                    <td class="text-dim text-sm">Combat resolver must be mathematically anti-symmetric across focal/opponent swap</td>
+                    <td class="font-mono text-sm">P(A vs B) + P(B vs A) == 100.0%</td>
+                    <td class="font-mono text-sm">100.00% +/- 1.0%</td>
+                    <td class="font-mono text-sm font-semibold">100.00% (7.2% + 92.8%)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Unit Count Dominance Law</td>
+                    <td class="text-dim text-sm">9 units (2-star) must overwhelmingly crush 3 units (1-star)</td>
+                    <td class="font-mono text-sm">P(9 Units vs 3 Units) &gt;= 95.0%</td>
+                    <td class="font-mono text-sm">&gt;= 95.00%</td>
+                    <td class="font-mono text-sm font-semibold">99.87%</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Star Level Dominance Law</td>
+                    <td class="text-dim text-sm">Full 3-star composition must consistently defeat an identical 1-star composition</td>
+                    <td class="font-mono text-sm">P(3-Star vs 1-Star) &gt;= 90.0%</td>
+                    <td class="font-mono text-sm">&gt;= 90.00%</td>
+                    <td class="font-mono text-sm font-semibold">96.30%</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Item Advantage Law</td>
+                    <td class="text-dim text-sm">An identical composition equipped with 9 completed meta items must overwhelmingly defeat 0 items</td>
+                    <td class="font-mono text-sm">P(9 Items vs 0 Items) &gt;= 80.0%</td>
+                    <td class="font-mono text-sm">&gt;= 80.00%</td>
+                    <td class="font-mono text-sm font-semibold">92.83%</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Champion Cost Dominance Law</td>
+                    <td class="text-dim text-sm">Full 4-cost / 5-cost composition must overpower a 1-cost composition of equal stars</td>
+                    <td class="font-mono text-sm">P(High Cost vs Low Cost) &gt;= 75.0%</td>
+                    <td class="font-mono text-sm">&gt;= 75.00%</td>
+                    <td class="font-mono text-sm font-semibold">75.31%</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                        </tbody>
+                        </table>
+                    </div>
+                </div>
+            </details>
+        
 
-      </div>
+            <details class="model-card">
+                <summary class="card-header">
+                    <div>
+                        <h2 class="card-title">BoardQualityNet</h2>
+                        <div class="card-subtitle font-mono">Checkpoint: models\board_evaluator\board_quality_best.pt</div>
+                    </div>
+                    <div class="summary-status"><span class="badge status-pass">PASS</span><span class="chevron" aria-hidden="true">&#8250;</span></div>
+                </summary>
+                <div class="card-content">
+                    
+                    
+            <div class="metrics-container">
+                <div class="section-title">Model Metrics</div>
+                <div class="metrics-grid"><div class="metric-pill"><span class="text-dim">Tests passed:</span><span class="font-mono font-semibold">4/4</span></div><div class="metric-pill"><span class="text-dim">Audit status:</span><span class="font-mono font-semibold">PASS</span></div></div>
+            </div>
+        
+                    <div class="table-container">
+                        <div class="section-title">Deterministic TFT Law Tests</div>
+                        <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Test Name</th>
+                                <th>Description</th>
+                                <th>Physical TFT Law</th>
+                                <th>Expected</th>
+                                <th>Actual Measured</th>
+                                <th>Verdict</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            
+                <tr>
+                    <td class="font-medium">Endgame Composition Separation Law</td>
+                    <td class="text-dim text-sm">A capped Stage 5 Level 9 board must predict a substantially superior finish than an early weak board</td>
+                    <td class="font-mono text-sm">E[Place_weak] - E[Place_capped] &gt;= 2.0 places</td>
+                    <td class="font-mono text-sm">&gt;= +2.00 places difference</td>
+                    <td class="font-mono text-sm font-semibold">+2.37 places (Capped: 1.74, Weak: 4.11)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Star Upgrade Placement Benefit Law</td>
+                    <td class="text-dim text-sm">Upgrading an entire board from 1-star to 3-star must meaningfully improve placement</td>
+                    <td class="font-mono text-sm">E[Place_1star] - E[Place_3star] &gt;= 0.50 places</td>
+                    <td class="font-mono text-sm">&gt;= +0.50 places improvement</td>
+                    <td class="font-mono text-sm font-semibold">+0.86 places (1*: 3.87 -&gt; 3*: 3.01)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Itemization Placement Benefit Law</td>
+                    <td class="text-dim text-sm">Equipping 9 completed meta items on carries/tanks must improve expected placement</td>
+                    <td class="font-mono text-sm">E[Place_naked] - E[Place_items] &gt;= 0.40 places</td>
+                    <td class="font-mono text-sm">&gt;= +0.40 places improvement</td>
+                    <td class="font-mono text-sm font-semibold">+0.52 places (Naked: 3.25 -&gt; Full: 2.72)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Health Buffer Survival Law</td>
+                    <td class="text-dim text-sm">At identical boards, a player with 100 HP must have a strictly higher Top-4 probability than a player at 12 HP</td>
+                    <td class="font-mono text-sm">P(Top-4 | 100 HP) - P(Top-4 | 12 HP) &gt;= 10.0%</td>
+                    <td class="font-mono text-sm">&gt;= +10.00% higher survival</td>
+                    <td class="font-mono text-sm font-semibold">+64.5% points (100 HP: 99.1%, 12 HP: 34.6%)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                        </tbody>
+                        </table>
+                    </div>
+                </div>
+            </details>
+        
 
-      <!-- Why Alignment is Crucial -->
-      <div class="bg-sky-950/20 border border-sky-800/40 rounded-xl p-5 mt-6 text-xs sm:text-sm text-sky-200">
-        <h4 class="font-bold text-sky-400 mb-1">¿Por qué es crítico que todos los modelos pasen la auditoría?</h4>
-        <p class="leading-relaxed text-slate-300">
-          En el RL clásico, el entorno proporciona recompensas objetivas. En TFT, las recompensas y los combates provienen de nuestros modelos auxiliares. Si el simulador de combate (<code class="text-xs text-sky-300">DeepSiameseCombatNet</code>) o el oráculo (<code class="text-xs text-sky-300">BoardQualityNet</code>) sufren de ceguera ante los objetos, el agente de RL aprende que equipar items es irrelevante, quedando atascado en rangos bajos. La auditoría garantiza la solidez de todo el ecosistema.
-        </p>
-      </div>
+            <details class="model-card">
+                <summary class="card-header">
+                    <div>
+                        <h2 class="card-title">StateTransitionPredictor (World Model)</h2>
+                        <div class="card-subtitle font-mono">Checkpoint: models\transition_predictor\predictor_best.pt</div>
+                    </div>
+                    <div class="summary-status"><span class="badge status-pass">PASS</span><span class="chevron" aria-hidden="true">&#8250;</span></div>
+                </summary>
+                <div class="card-content">
+                    
+                    
+            <div class="metrics-container">
+                <div class="section-title">Model Metrics</div>
+                <div class="metrics-grid"><div class="metric-pill"><span class="text-dim">Tests passed:</span><span class="font-mono font-semibold">3/3</span></div><div class="metric-pill"><span class="text-dim">Audit status:</span><span class="font-mono font-semibold">PASS</span></div></div>
+            </div>
+        
+                    <div class="table-container">
+                        <div class="section-title">Deterministic TFT Law Tests</div>
+                        <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Test Name</th>
+                                <th>Description</th>
+                                <th>Physical TFT Law</th>
+                                <th>Expected</th>
+                                <th>Actual Measured</th>
+                                <th>Verdict</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            
+                <tr>
+                    <td class="font-medium">Non-Identity Dynamics Law</td>
+                    <td class="text-dim text-sm">World Model must predict non-zero transition dynamics (must not output identity copy of input)</td>
+                    <td class="font-mono text-sm">cos_sim(s_t, s_hat_{t+1}) &lt; 0.9995</td>
+                    <td class="font-mono text-sm">&lt; 0.9995 (genuine transition)</td>
+                    <td class="font-mono text-sm font-semibold">0.93567</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Autoregressive Rollout Stability Law</td>
+                    <td class="text-dim text-sm">Multi-step recursive lookahead must not explode towards infinity or collapse to zero</td>
+                    <td class="font-mono text-sm">0.50 &lt;= ||s_{t+5}|| / ||s_t|| &lt;= 2.00</td>
+                    <td class="font-mono text-sm">[0.50, 2.00]</td>
+                    <td class="font-mono text-sm font-semibold">0.987x norm ratio</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Residual Transition Magnitude Law</td>
+                    <td class="text-dim text-sm">Predicted change delta must have measurable non-zero Euclidean magnitude</td>
+                    <td class="font-mono text-sm">||s_hat_{t+1} - s_t|| &gt; 0.01</td>
+                    <td class="font-mono text-sm">&gt; 0.010</td>
+                    <td class="font-mono text-sm font-semibold">3.4793</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                        </tbody>
+                        </table>
+                    </div>
+                </div>
+            </details>
+        
 
+            <details class="model-card">
+                <summary class="card-header">
+                    <div>
+                        <h2 class="card-title">Z-Index Macro Composition Centroids</h2>
+                        <div class="card-subtitle font-mono">Checkpoint: models\clustering\z_index.pt</div>
+                    </div>
+                    <div class="summary-status"><span class="badge status-pass">PASS</span><span class="chevron" aria-hidden="true">&#8250;</span></div>
+                </summary>
+                <div class="card-content">
+                    
+                    
+            <div class="metrics-container">
+                <div class="section-title">Model Metrics</div>
+                <div class="metrics-grid"><div class="metric-pill"><span class="text-dim">Tests passed:</span><span class="font-mono font-semibold">3/3</span></div><div class="metric-pill"><span class="text-dim">Audit status:</span><span class="font-mono font-semibold">PASS</span></div>
+                <div class="metric-pill">
+                    <span class="text-dim">Cluster count k:</span>
+                    <span class="font-mono font-semibold">8</span>
+                </div>
+            
+                <div class="metric-pill">
+                    <span class="text-dim">Latent feature dim:</span>
+                    <span class="font-mono font-semibold">256</span>
+                </div>
+            
+                <div class="metric-pill">
+                    <span class="text-dim">Mean centroid norm:</span>
+                    <span class="font-mono font-semibold">0.533</span>
+                </div>
+            </div>
+            </div>
+        
+                    <div class="table-container">
+                        <div class="section-title">Deterministic TFT Law Tests</div>
+                        <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Test Name</th>
+                                <th>Description</th>
+                                <th>Physical TFT Law</th>
+                                <th>Expected</th>
+                                <th>Actual Measured</th>
+                                <th>Verdict</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            
+                <tr>
+                    <td class="font-medium">Archetype Orthogonality Law</td>
+                    <td class="text-dim text-sm">Target archetypes must represent distinctly separated strategic comps</td>
+                    <td class="font-mono text-sm">max_{i != j} cos_sim(z_i, z_j) &lt; 0.85</td>
+                    <td class="font-mono text-sm">&lt; 0.850</td>
+                    <td class="font-mono text-sm font-semibold">0.3885 (mean sim = -0.1353)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Centroid Non-Degeneracy Law</td>
+                    <td class="text-dim text-sm">All k cluster centroids must possess non-trivial vector magnitude</td>
+                    <td class="font-mono text-sm">min_k ||z_k|| &gt; 0.10</td>
+                    <td class="font-mono text-sm">&gt; 0.100</td>
+                    <td class="font-mono text-sm font-semibold">0.4684</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Semantic Composition Alignment Law</td>
+                    <td class="text-dim text-sm">Canonical tournament compositions must project positively into the latent archetype subspace</td>
+                    <td class="font-mono text-sm">max_k cos_sim(h_{comp}, z_k) &gt; 0.15</td>
+                    <td class="font-mono text-sm">&gt; 0.150 for meta comps</td>
+                    <td class="font-mono text-sm font-semibold">Comp A max sim = 0.3469, Comp B max sim = 0.4592</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                        </tbody>
+                        </table>
+                    </div>
+                </div>
+            </details>
+        
+
+            <details class="model-card">
+                <summary class="card-header">
+                    <div>
+                        <h2 class="card-title">EloRegressor (Skill Rating Predictor)</h2>
+                        <div class="card-subtitle font-mono">Checkpoint: models\elo_predictor\elo_regressor_player_level.pkl</div>
+                    </div>
+                    <div class="summary-status"><span class="badge status-pass">PASS</span><span class="chevron" aria-hidden="true">&#8250;</span></div>
+                </summary>
+                <div class="card-content">
+                    
+                <div class="diagnosis-box diag-warn">
+                    <strong>Diagnosis & Root Cause:</strong> All Elo regressor sanity laws passed.
+                </div>
+            
+                    
+            <div class="metrics-container">
+                <div class="section-title">Model Metrics</div>
+                <div class="metrics-grid"><div class="metric-pill"><span class="text-dim">Tests passed:</span><span class="font-mono font-semibold">4/4</span></div><div class="metric-pill"><span class="text-dim">Audit status:</span><span class="font-mono font-semibold">PASS</span></div></div>
+            </div>
+        
+                    <div class="table-container">
+                        <div class="section-title">Deterministic TFT Law Tests</div>
+                        <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Test Name</th>
+                                <th>Description</th>
+                                <th>Physical TFT Law</th>
+                                <th>Expected</th>
+                                <th>Actual Measured</th>
+                                <th>Verdict</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            
+                <tr>
+                    <td class="font-medium">Model Object &amp; Inference Interface</td>
+                    <td class="text-dim text-sm">MatchEloRegressor deserializes cleanly and exposes competitive predict_match interface</td>
+                    <td class="font-mono text-sm">hasattr(model, &#x27;predict_match&#x27;)</td>
+                    <td class="font-mono text-sm">True</td>
+                    <td class="font-mono text-sm font-semibold">hasattr = True</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Competitive Tempo Monotonicity Law</td>
+                    <td class="text-dim text-sm">Aggressive Challenger tempo must predict strictly higher rating than passive low-tier play</td>
+                    <td class="font-mono text-sm">Elo(Challenger Tempo) - Elo(Iron Tempo) &gt;= +800</td>
+                    <td class="font-mono text-sm">&gt;= +800 ELO separation</td>
+                    <td class="font-mono text-sm font-semibold">Delta = +1501 ELO (Challenger: 2895 [MASTER] vs Iron: 1394 [GOLD])</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Solution Space OOD Detection Law</td>
+                    <td class="text-dim text-sm">Valid human gameplay must be flagged in-distribution, aberrant bot trajectories flagged as outliers</td>
+                    <td class="font-mono text-sm">Human == Inlier and Aberrant Bot == Outlier</td>
+                    <td class="font-mono text-sm">Human inlier and Bot outlier</td>
+                    <td class="font-mono text-sm font-semibold">Human inlier=True (98.8%), Bot outlier=True (Dist=32.5)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Competitive Elo Range Boundedness Law</td>
+                    <td class="text-dim text-sm">Predicted Elo ratings must remain within realistic ranked ladder bounds [100, 4600]</td>
+                    <td class="font-mono text-sm">100.0 &lt;= Elo &lt;= 4600.0</td>
+                    <td class="font-mono text-sm">[100, 4600]</td>
+                    <td class="font-mono text-sm font-semibold">Challenger: 2895, Iron: 1394</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                        </tbody>
+                        </table>
+                    </div>
+                </div>
+            </details>
+        
+
+            <details class="model-card">
+                <summary class="card-header">
+                    <div>
+                        <h2 class="card-title">TFTActorCritic (AlphaStar ppo_alphastar_v7 gen_0030)</h2>
+                        <div class="card-subtitle font-mono">Checkpoint: D:\tft-winner-data\set18\models\rl\checkpoints\ppo_alphastar_v7\gen_0030\training_state.pt</div>
+                    </div>
+                    <div class="summary-status"><span class="badge status-fail">FAIL</span><span class="chevron" aria-hidden="true">&#8250;</span></div>
+                </summary>
+                <div class="card-content">
+                    
+                <div class="diagnosis-box diag-fail">
+                    <strong>Diagnosis & Root Cause:</strong> TFTActorCritic fails the following laws: Critic Item Sensitivity Law.
+                </div>
+            
+                    
+            <div class="metrics-container">
+                <div class="section-title">Model Metrics</div>
+                <div class="metrics-grid"><div class="metric-pill"><span class="text-dim">Tests passed:</span><span class="font-mono font-semibold">3/4</span></div><div class="metric-pill"><span class="text-dim">Audit status:</span><span class="font-mono font-semibold">FAIL</span></div></div>
+            </div>
+        
+                    <div class="table-container">
+                        <div class="section-title">Deterministic TFT Law Tests</div>
+                        <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Test Name</th>
+                                <th>Description</th>
+                                <th>Physical TFT Law</th>
+                                <th>Expected</th>
+                                <th>Actual Measured</th>
+                                <th>Verdict</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            
+                <tr>
+                    <td class="font-medium">Action Mask Enforcement Law</td>
+                    <td class="text-dim text-sm">Illegal masked actions must receive mathematically zero probability mass</td>
+                    <td class="font-mono text-sm">sum_{a in masked} P(a) == 0.0000</td>
+                    <td class="font-mono text-sm">0.000000</td>
+                    <td class="font-mono text-sm font-semibold">0.00000000</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Health Monotonicity Value Law</td>
+                    <td class="text-dim text-sm">Higher health buffer must reflect higher expected cumulative return V(s)</td>
+                    <td class="font-mono text-sm">V(s | 100 HP) &gt; V(s | 12 HP)</td>
+                    <td class="font-mono text-sm">V(100 HP) &gt; V(12 HP)</td>
+                    <td class="font-mono text-sm font-semibold">Delta = +4.5324 (100 HP: +6.818 vs 12 HP: +2.286)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Board Size Value Monotonicity Law</td>
+                    <td class="text-dim text-sm">A 9-unit full board must evaluate to a strictly higher expected return than a 3-unit board</td>
+                    <td class="font-mono text-sm">V(s | 9 Units) &gt; V(s | 3 Units)</td>
+                    <td class="font-mono text-sm">V(9 Units) &gt; V(3 Units)</td>
+                    <td class="font-mono text-sm font-semibold">Delta = +1.4714 (9 Units: +8.197 vs 3 Units: +6.725)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Critic Item Sensitivity Law</td>
+                    <td class="text-dim text-sm">The critic value function V(s) must appreciate the massive combat value of 9 completed items</td>
+                    <td class="font-mono text-sm">V(s | 9 Items) - V(s | 0 Items) &gt; +0.10</td>
+                    <td class="font-mono text-sm">&gt;= +0.100 higher value</td>
+                    <td class="font-mono text-sm font-semibold">-2.2178 (Naked: +8.139 -&gt; Items: +5.922)</td>
+                    <td><span class="badge badge-sm status-fail">FAIL</span></td>
+                </tr>
+            
+                        </tbody>
+                        </table>
+                    </div>
+                </div>
+            </details>
+        
     </div>
-
-  </main>
-
-  <!-- Script for Navigation, Data Injection, and Live RPi Polling -->
-  <script>
-    // Cached RPi Status Data (Snapshot)
-    const DEFAULT_PI_DATA = {
-      total_matches_on_disk: 14048,
-      session_downloaded: 3092,
-      download_rate_per_hour: 1105.4,
-      uptime_hours: 2.8,
-      system: {
-        cpu_temp_c: 76.4,
-        ram_percent: 5.7,
-        free_disk_gb: 49.51,
-        total_disk_gb: 58.02
-      },
-      distribution: {
-        "CHALLENGER": { "downloaded": 398, "pending_games": 0, "current_share_pct": 2.8, "target_share_pct": 10.0 },
-        "GRANDMASTER": { "downloaded": 2221, "pending_games": 2349, "current_share_pct": 15.8, "target_share_pct": 15.0 },
-        "MASTER": { "downloaded": 2940, "pending_games": 9937, "current_share_pct": 20.9, "target_share_pct": 20.0 },
-        "DIAMOND": { "downloaded": 2653, "pending_games": 31645, "current_share_pct": 18.9, "target_share_pct": 18.0 },
-        "EMERALD": { "downloaded": 2076, "pending_games": 46592, "current_share_pct": 14.8, "target_share_pct": 14.0 },
-        "PLATINUM": { "downloaded": 1497, "pending_games": 39512, "current_share_pct": 10.7, "target_share_pct": 10.0 },
-        "GOLD": { "downloaded": 970, "pending_games": 10747, "current_share_pct": 6.9, "target_share_pct": 8.0 },
-        "SILVER": { "downloaded": 725, "pending_games": 3520, "current_share_pct": 5.2, "target_share_pct": 3.0 },
-        "BRONZE": { "downloaded": 420, "pending_games": 1240, "current_share_pct": 3.0, "target_share_pct": 1.5 },
-        "IRON": { "downloaded": 147, "pending_games": 450, "current_share_pct": 1.0, "target_share_pct": 0.5 }
-      }
-    };
-
-    const TIER_COLORS = {
-      'CHALLENGER': '#f43f5e',
-      'GRANDMASTER': '#ef4444',
-      'MASTER': '#a855f7',
-      'DIAMOND': '#38bdf8',
-      'EMERALD': '#10b981',
-      'PLATINUM': '#06b6d4',
-      'GOLD': '#eab308',
-      'SILVER': '#94a3b8',
-      'BRONZE': '#b45309',
-      'IRON': '#64748b'
-    };
-
-    let rpiBarChart = null;
-    let rpiDoughnutChart = null;
-    let activePiData = DEFAULT_PI_DATA;
-
-    function switchNavTab(tab) {
-      const views = ['models', 'raspberry', 'arch'];
-      views.forEach(v => {
-        const el = document.getElementById(`view-${v}`);
-        const btn = document.getElementById(`nav-${v}`);
-        if (v === tab) {
-          el.classList.remove('hidden');
-          btn.className = 'px-3.5 py-1.5 rounded-lg font-semibold transition-all bg-sky-600 text-white shadow-sm flex items-center gap-1.5';
-        } else {
-          el.classList.add('hidden');
-          btn.className = 'px-3.5 py-1.5 rounded-lg font-semibold transition-all text-slate-400 hover:text-white hover:bg-slate-800/60 flex items-center gap-1.5';
-        }
-      });
-
-      if (tab === 'raspberry') {
-        renderPiCharts(activePiData);
-        refreshPiData();
-      }
-    }
-
-    function renderPiCharts(data) {
-      activePiData = data;
-      // Update KPIs
-      if (data.total_matches_on_disk !== undefined) {
-        const el = document.getElementById('kpi-total-matches');
-        if (el) el.textContent = data.total_matches_on_disk.toLocaleString();
-      }
-      if (data.session_downloaded !== undefined) {
-        const el = document.getElementById('kpi-session-dl');
-        if (el) el.textContent = `+${data.session_downloaded.toLocaleString()} en sesión`;
-      }
-      if (data.download_rate_per_hour !== undefined) {
-        const el = document.getElementById('kpi-rate');
-        if (el) el.textContent = Math.round(data.download_rate_per_hour).toLocaleString();
-      }
-      if (data.uptime_hours !== undefined) {
-        const el = document.getElementById('kpi-uptime');
-        if (el) el.textContent = `${data.uptime_hours.toFixed(1)}h`;
-      }
-      if (data.system) {
-        if (data.system.cpu_temp_c !== undefined) {
-          const el = document.getElementById('kpi-temp');
-          if (el) el.textContent = `${data.system.cpu_temp_c.toFixed(1)}°C`;
-        }
-        if (data.system.ram_percent !== undefined) {
-          const el = document.getElementById('kpi-ram');
-          if (el) el.textContent = `${data.system.ram_percent.toFixed(1)}%`;
-        }
-        if (data.system.free_disk_gb !== undefined) {
-          const el = document.getElementById('kpi-disk');
-          if (el) el.textContent = `${data.system.free_disk_gb.toFixed(1)} GB`;
-        }
-      }
-
-      const tiers = Object.keys(data.distribution);
-      const currentPct = tiers.map(t => data.distribution[t].current_share_pct);
-      const targetPct = tiers.map(t => data.distribution[t].target_share_pct);
-      const pendingCounts = tiers.map(t => data.distribution[t].pending_games || 0);
-
-      // Bar Chart: Current vs Target Share
-      const ctxBar = document.getElementById('rpiTiersChart').getContext('2d');
-      if (rpiBarChart) rpiBarChart.destroy();
-      rpiBarChart = new Chart(ctxBar, {
-        type: 'bar',
-        data: {
-          labels: tiers,
-          datasets: [
-            {
-              label: '% Real en Disco',
-              data: currentPct,
-              backgroundColor: '#38bdf8cc',
-              borderColor: '#38bdf8',
-              borderWidth: 1,
-              borderRadius: 4
-            },
-            {
-              label: '% Objetivo',
-              data: targetPct,
-              backgroundColor: '#f59e0b44',
-              borderColor: '#f59e0b',
-              borderWidth: 1,
-              borderRadius: 4
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { labels: { color: '#94a3b8', font: { size: 11 } } },
-            tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.raw}%` } }
-          },
-          scales: {
-            y: { beginAtZero: true, ticks: { color: '#64748b', callback: v => v + '%' }, grid: { color: '#1e293b' } },
-            x: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { display: false } }
-          }
-        }
-      });
-
-      // Doughnut: Pending Games
-      const ctxPending = document.getElementById('rpiPendingChart').getContext('2d');
-      if (rpiDoughnutChart) rpiDoughnutChart.destroy();
-      rpiDoughnutChart = new Chart(ctxPending, {
-        type: 'doughnut',
-        data: {
-          labels: tiers,
-          datasets: [{
-            data: pendingCounts,
-            backgroundColor: tiers.map(t => TIER_COLORS[t] || '#64748b'),
-            borderWidth: 2,
-            borderColor: '#121a2d'
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw.toLocaleString()} en cola` } }
-          }
-        }
-      });
-
-      // Populate Table Body
-      const tbody = document.getElementById('rpi-tier-table-body');
-      if (tbody) {
-        tbody.innerHTML = '';
-        tiers.forEach(tier => {
-          const item = data.distribution[tier];
-          const deficit = (item.target_share_pct - item.current_share_pct);
-          const defColor = deficit > 0 ? 'text-amber-400' : 'text-emerald-400';
-          const tr = document.createElement('tr');
-          tr.className = 'hover:bg-slate-800/30';
-          tr.innerHTML = `
-            <td class="p-2.5 font-semibold text-white flex items-center gap-1.5">
-              <span class="w-2 h-2 rounded-full" style="background-color: ${TIER_COLORS[tier] || '#94a3b8'}"></span>
-              ${tier}
-            </td>
-            <td class="p-2.5 text-slate-200">${item.downloaded.toLocaleString()}</td>
-            <td class="p-2.5 text-slate-400">${item.pending_games.toLocaleString()}</td>
-            <td class="p-2.5 text-sky-400 font-bold">${item.current_share_pct.toFixed(1)}%</td>
-            <td class="p-2.5 text-amber-400">${item.target_share_pct.toFixed(1)}%</td>
-            <td class="p-2.5 ${defColor} font-bold">${deficit > 0 ? '+' : ''}${deficit.toFixed(1)}%</td>
-          `;
-          tbody.appendChild(tr);
-        });
-      }
-    }
-
-    async function refreshPiData() {
-      const endpoints = [
-        'https://without-fly-privileges-lots.trycloudflare.com/api/status',
-        'http://raspberrypi.local:8080/api/status',
-        './pi_status.json'
-      ];
-
-      for (const url of endpoints) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 3500);
-          const res = await fetch(url, { mode: 'cors', signal: controller.signal });
-          clearTimeout(timeoutId);
-          if (res.ok) {
-            const data = await res.json();
-            renderPiCharts(data);
-            const badge = document.getElementById('rpi-last-updated');
-            if (badge) {
-              badge.textContent = `${new Date().toLocaleTimeString()} (En vivo)`;
-              badge.className = 'font-mono font-medium text-emerald-400';
-            }
-            return;
-          }
-        } catch (e) {
-          // fallback to next
-        }
-      }
-      const badge = document.getElementById('rpi-last-updated');
-      if (badge) badge.textContent = 'Snapshot Local';
-    }
-
-    // Initialize on load and poll every 15s
-    document.addEventListener('DOMContentLoaded', () => {
-      renderPiCharts(DEFAULT_PI_DATA);
-      refreshPiData();
-      setInterval(() => {
-        const rpiView = document.getElementById('view-raspberry');
-        if (rpiView && !rpiView.classList.contains('hidden')) {
-          refreshPiData();
-        }
-      }, 15000);
-    });
-  </script>
-
 </body>
 </html>

@@ -759,15 +759,23 @@ class Player:
         pool: ChampionPool,
     ) -> bool:
         """Sell a unit from board or bench, refunding gold and popping items."""
-        unit: ChampionInstance | None = None
+        unit: ChampionInstance | None
         if is_board and isinstance(loc, tuple):
-            unit = self.board.pop(loc, None)
+            unit = self.board.get(loc)
         elif not is_board and isinstance(loc, int) and 0 <= loc < len(self.bench):
             unit = self.bench[loc]
-            self.bench[loc] = None
+        else:
+            return False
 
         if unit is None:
             return False
+        if len(unit.items) > self.free_item_slots:
+            return False
+
+        if is_board and isinstance(loc, tuple):
+            del self.board[loc]
+        else:
+            self.bench[loc] = None
 
         # Return items to item bench
         for item_id in unit.items:
@@ -1021,6 +1029,8 @@ class Player:
             unit = self.bench[loc]
 
         if unit is None or not unit.items:
+            return False
+        if len(unit.items) > self.free_item_slots:
             return False
 
         # Pop all items to item bench

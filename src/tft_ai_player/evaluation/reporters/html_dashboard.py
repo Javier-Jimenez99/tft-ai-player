@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,29 @@ def generate_html_report(audit_data: dict[str, Any], output_path: str | Path) ->
     timestamp = audit_data.get("timestamp", "N/A")
     elapsed = audit_data.get("elapsed_seconds", 0.0)
     device = audit_data.get("device", "cpu")
+
+    collector_status: dict[str, Any] = {}
+    status_path = Path(output_path).resolve().parent.parent / "data" / "status.json"
+    if status_path.exists():
+        try:
+            collector_status = json.loads(status_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            collector_status = {}
+
+    tier_rows = "".join(
+        f"""
+            <tr>
+                <td class="font-medium">{escape(str(tier))}</td>
+                <td class="font-mono">{escape(str(values.get('downloaded', 0)))}</td>
+                <td class="font-mono">{escape(str(values.get('pending_games', 0)))}</td>
+                <td class="font-mono">{escape(str(values.get('unscanned_players', 0)))}</td>
+                <td class="font-mono">{escape(str(values.get('current_share_pct', 0)))}%</td>
+                <td class="font-mono">{escape(str(values.get('target_share_pct', 0)))}%</td>
+            </tr>
+        """
+        for tier, values in collector_status.get("distribution", {}).items()
+        if isinstance(values, dict)
+    )
 
     total_tests = 0
     passed_tests = 0
@@ -44,6 +68,7 @@ def generate_html_report(audit_data: dict[str, Any], output_path: str | Path) ->
 
         status_class = f"status-{status.lower()}"
         status_badge = f'<span class="badge {status_class}">{status}</span>'
+        passed_model_tests = sum(1 for test in tests if test.get("status", "PASS") == "PASS")
 
         # Tests table
         tests_rows = []
@@ -52,58 +77,61 @@ def generate_html_report(audit_data: dict[str, Any], output_path: str | Path) ->
             t_badge = f'<span class="badge badge-sm status-{t_status.lower()}">{t_status}</span>'
             tests_rows.append(f"""
                 <tr>
-                    <td class="font-medium">{t.get("name", "")}</td>
-                    <td class="text-dim text-sm">{t.get("description", "")}</td>
-                    <td class="font-mono text-sm">{t.get("law", "")}</td>
-                    <td class="font-mono text-sm">{t.get("expected", "")}</td>
-                    <td class="font-mono text-sm font-semibold">{t.get("actual", "")}</td>
+                    <td class="font-medium">{escape(str(t.get("name", "")))}</td>
+                    <td class="text-dim text-sm">{escape(str(t.get("description", "")))}</td>
+                    <td class="font-mono text-sm">{escape(str(t.get("law", "")))}</td>
+                    <td class="font-mono text-sm">{escape(str(t.get("expected", "")))}</td>
+                    <td class="font-mono text-sm font-semibold">{escape(str(t.get("actual", "")))}</td>
                     <td>{t_badge}</td>
                 </tr>
             """)
         tests_table = "".join(tests_rows)
 
-        # Empirical metrics list
-        metrics_html = ""
-        if empirical:
-            metric_items = []
-            for mk, mv in empirical.items():
-                label = mk.replace("_", " ").capitalize()
-                metric_items.append(f"""
-                    <div class="metric-pill">
-                        <span class="text-dim">{label}:</span>
-                        <span class="font-mono font-semibold">{mv}</span>
-                    </div>
-                """)
-            metrics_html = f"""
-                <div class="metrics-container">
-                    <div class="section-title">Empirical Replay Metrics</div>
-                    <div class="metrics-grid">{"".join(metric_items)}</div>
+        # Every model receives a compact independent metric summary, even when
+        # its audit has no replay-derived measurements.
+        metric_items = [
+            f'<div class="metric-pill"><span class="text-dim">Tests passed:</span><span class="font-mono font-semibold">{passed_model_tests}/{len(tests)}</span></div>',
+            f'<div class="metric-pill"><span class="text-dim">Audit status:</span><span class="font-mono font-semibold">{escape(str(status))}</span></div>',
+        ]
+        for mk, mv in empirical.items():
+            label = escape(mk.replace("_", " ").capitalize())
+            metric_items.append(f"""
+                <div class="metric-pill">
+                    <span class="text-dim">{label}:</span>
+                    <span class="font-mono font-semibold">{escape(str(mv))}</span>
                 </div>
-            """
+            """)
+        metrics_html = f"""
+            <div class="metrics-container">
+                <div class="section-title">Model Metrics</div>
+                <div class="metrics-grid">{"".join(metric_items)}</div>
+            </div>
+        """
 
         diag_html = ""
         if diagnosis:
             diag_class = "diag-fail" if status == "FAIL" else "diag-warn"
             diag_html = f"""
                 <div class="diagnosis-box {diag_class}">
-                    <strong>Diagnosis & Root Cause:</strong> {diagnosis}
+                    <strong>Diagnosis & Root Cause:</strong> {escape(str(diagnosis))}
                 </div>
             """
 
         cards_html.append(f"""
-            <div class="model-card">
-                <div class="card-header">
+            <details class="model-card">
+                <summary class="card-header">
                     <div>
-                        <h2 class="card-title">{name}</h2>
-                        <div class="card-subtitle font-mono">{ckpt}</div>
+                        <h2 class="card-title">{escape(str(name))}</h2>
+                        <div class="card-subtitle font-mono">Checkpoint: {escape(str(ckpt))}</div>
                     </div>
-                    <div>{status_badge}</div>
-                </div>
-                {diag_html}
-                {metrics_html}
-                <div class="table-container">
-                    <div class="section-title">Deterministic Axiomatic Law Tests</div>
-                    <table class="data-table">
+                    <div class="summary-status">{status_badge}<span class="chevron" aria-hidden="true">&#8250;</span></div>
+                </summary>
+                <div class="card-content">
+                    {diag_html}
+                    {metrics_html}
+                    <div class="table-container">
+                        <div class="section-title">Deterministic TFT Law Tests</div>
+                        <table class="data-table">
                         <thead>
                             <tr>
                                 <th>Test Name</th>
@@ -117,9 +145,10 @@ def generate_html_report(audit_data: dict[str, Any], output_path: str | Path) ->
                         <tbody>
                             {tests_table}
                         </tbody>
-                    </table>
+                        </table>
+                    </div>
                 </div>
-            </div>
+            </details>
         """)
 
     all_cards = "\n".join(cards_html)
@@ -237,18 +266,25 @@ def generate_html_report(audit_data: dict[str, Any], output_path: str | Path) ->
         .model-card {{
             background-color: var(--bg-secondary);
             border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 2rem;
+            border-radius: 8px;
+            margin-bottom: 0.75rem;
         }}
         .card-header {{
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            border-bottom: 1px solid var(--border);
-            padding-bottom: 1rem;
-            margin-bottom: 1.25rem;
+            cursor: pointer;
+            list-style: none;
+            padding: 1.25rem 1.5rem;
         }}
+        .card-header::-webkit-details-marker {{ display: none; }}
+        .model-card[open] .card-header {{
+            border-bottom: 1px solid var(--border);
+        }}
+        .card-content {{ padding: 1.25rem 1.5rem 1.5rem; }}
+        .summary-status {{ display: flex; align-items: center; gap: 0.75rem; }}
+        .chevron {{ color: var(--text-dim); font-size: 1.5rem; transition: transform 0.15s ease; }}
+        .model-card[open] .chevron {{ transform: rotate(90deg); }}
         .card-title {{
             font-size: 1.3rem;
             font-weight: 600;
@@ -332,6 +368,38 @@ def generate_html_report(audit_data: dict[str, Any], output_path: str | Path) ->
         .font-semibold {{ font-weight: 600; }}
         .text-dim {{ color: var(--text-dim); }}
         .text-sm {{ font-size: 0.8rem; }}
+        .collector-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }}
+        .collector-details {{
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 0.75rem;
+            padding: 1.25rem 1.5rem;
+        }}
+        .collector-details summary {{
+            cursor: pointer;
+            color: #ffffff;
+            font-weight: 600;
+            list-style: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .collector-details summary::-webkit-details-marker {{ display: none; }}
+        .collector-details .table-container {{ margin-top: 1.25rem; }}
+        .collector-details[open] .chevron {{ transform: rotate(90deg); }}
+        @media (max-width: 640px) {{
+            body {{ padding: 1rem; }}
+            header {{ display: block; }}
+            header > div:last-child {{ margin-top: 1rem; }}
+            .card-header {{ padding: 1rem; }}
+            .card-content {{ padding: 1rem; }}
+        }}
     </style>
 </head>
 <body>
@@ -368,6 +436,23 @@ def generate_html_report(audit_data: dict[str, Any], output_path: str | Path) ->
                 <div class="stat-value" style="color: var(--fail-text);">{failed_tests}</div>
             </div>
         </div>
+
+        <section class="collector-grid" aria-label="Data collection status">
+            <div class="stat-card"><div class="stat-title">Collector Status</div><div class="stat-value">{escape(str(collector_status.get("last_action", "unavailable"))).title()}</div></div>
+            <div class="stat-card"><div class="stat-title">Matches on Disk</div><div class="stat-value">{escape(str(collector_status.get("total_matches_on_disk", "N/A")))}</div></div>
+            <div class="stat-card"><div class="stat-title">Download Rate</div><div class="stat-value">{escape(str(collector_status.get("download_rate_per_hour", "N/A")))}/h</div></div>
+            <div class="stat-card"><div class="stat-title">Status Updated</div><div class="stat-value" style="font-size: 1rem;">{escape(str(collector_status.get("updated_at", "N/A")))}</div></div>
+        </section>
+
+        <details class="collector-details">
+            <summary>Collector Distribution by Tier <span class="chevron" aria-hidden="true">&#8250;</span></summary>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead><tr><th>Tier</th><th>Downloaded</th><th>Pending Games</th><th>Unscanned Players</th><th>Current Share</th><th>Target Share</th></tr></thead>
+                    <tbody>{tier_rows or '<tr><td colspan="6" class="text-dim">No collector distribution is available.</td></tr>'}</tbody>
+                </table>
+            </div>
+        </details>
 
         {all_cards}
     </div>

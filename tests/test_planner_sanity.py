@@ -10,6 +10,22 @@ from tft_ai_player.simulation.gym_env import TFTEnv, TFTStateEncoder
 from tft_ai_player.rl.planner import ShopBeamSearchPlanner
 from tft_ai_player.rl.models.networks import TFTActorCritic
 from tft_ai_player.rl.agent_policy import RLBot
+from tft_ai_player.simulation.models import ChampionInstance, Player
+
+
+class _ItemAwareEncoder:
+    def extract_state_vector(self, player, stage, round_in_stage, target_z=None):
+        equipped_items = sum(len(unit.items) for unit in player.board.values())
+        state = torch.tensor([float(equipped_items)])
+        return np.zeros(1, dtype=np.float32), state, state
+
+
+class _ItemAwareBoardEvaluator(torch.nn.Module):
+    def forward_fused(self, fused_state):
+        equipped_items = fused_state[:, 0]
+        placement = 8.0 - equipped_items * 7.0
+        top4_logits = torch.stack((torch.zeros_like(equipped_items), equipped_items * 10.0), dim=-1)
+        return placement, top4_logits
 
 def test_planner_and_env():
     print(" [+] Initializing Set18 Data and Env...")
@@ -69,6 +85,27 @@ def test_planner_and_env():
     print(f"     After bot turn: Gold: {focal.gold}, Board units: {focal.board_unit_count}")
 
     print("\n [SUCCESS] All unit sanity checks passed with ZERO errors!")
+
+
+def test_planner_selects_item_action_when_value_oracle_prefers_it():
+    """The value oracle must be able to choose a legacy item-action branch."""
+    set_data = get_set18_data()
+    player = Player(0, set_data)
+    player.board[(0, 0)] = ChampionInstance("TFT18_Maokai", cost=1, star_level=1)
+    player.add_item("TFT_Item_BFSword")
+    pool = TFTGame(set_data=set_data, seed=7).pool
+
+    planner = ShopBeamSearchPlanner(
+        set_data=set_data,
+        encoder=_ItemAwareEncoder(),
+        board_evaluator=_ItemAwareBoardEvaluator(),
+        use_neural_eval=True,
+        device=torch.device("cpu"),
+    )
+    actions = planner.plan_shop_sequence(player, pool, stage=2, round_in_stage=1)
+
+    assert actions
+    assert actions[0] == 101
 
 if __name__ == "__main__":
     test_planner_and_env()

@@ -298,8 +298,9 @@ class TFTPretrainDataset(Dataset):
             raw_items = unit.get("items", []) or []
 
             c_idx = self.vocab.encode(u_name)
-            if u_name:
-                board_champ_names.append(u_name)
+            canon_name = self.vocab.decode(c_idx)
+            if canon_name and canon_name != "<EMPTY>":
+                board_champ_names.append(canon_name)
 
             item_idxs = [self.item_vocab.encode(it) for it in raw_items[:3]]
             while len(item_idxs) < 3:

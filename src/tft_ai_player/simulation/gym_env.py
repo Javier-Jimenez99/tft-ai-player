@@ -1,14 +1,15 @@
 """Gymnasium reinforcement learning environment for Teamfight Tactics.
 
 Implements the Gymnasium Decision MDP with:
-  - 704D invariant concatenated state observation (320D core + 64D shop + 64D bench + 256D target Z)
-  - 111-action factorized discrete action space with strict pre-softmax masking
+  - 768D invariant concatenated state observation (384D core s_t + 64D shop + 64D bench + 256D target Z)
+    - 111-action factorized discrete action space with strict pre-softmax masking
   - Tabular calibrated LightGBM combat oracle (1,107 dims)
   - Multi-objective reward: R_step = R_env + alpha * R_macro + beta * R_micro
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 import random
 from typing import Any, Mapping
 
@@ -33,7 +34,10 @@ from tft_ai_player.simulation.models import ChampionInstance, Player
 
 
 class TFTStateEncoder:
-    """Extracts 704D invariant observation vector using frozen MultiModalFusionTrunk."""
+    """Extracts 768D invariant observation vector using frozen MultiModalFusionTrunk.
+
+    Obs = s_t(384) + shop_feat(64) + bench_feat(64) + z_target(256) = 768D
+    """
 
     def __init__(
         self,
@@ -46,9 +50,23 @@ class TFTStateEncoder:
     ) -> None:
         self.set_data = set_data
         self.device = device or torch.device("cpu")
-        self.vocab = vocab or ChampionVocabulary()
-        self.item_vocab = item_vocab or ItemVocabulary()
-        self.trait_vocab = trait_vocab or TraitVocabulary()
+        if vocab is None:
+            v_path = Path("models/trunk/vocab.json")
+            self.vocab = ChampionVocabulary.load(v_path) if v_path.exists() else ChampionVocabulary()
+        else:
+            self.vocab = vocab
+
+        if item_vocab is None:
+            iv_path = Path("models/trunk/item_vocab.json")
+            self.item_vocab = ItemVocabulary.load(iv_path) if iv_path.exists() else ItemVocabulary()
+        else:
+            self.item_vocab = item_vocab
+
+        if trait_vocab is None:
+            tv_path = Path("models/trunk/trait_vocab.json")
+            self.trait_vocab = TraitVocabulary.load(tv_path) if tv_path.exists() else TraitVocabulary()
+        else:
+            self.trait_vocab = trait_vocab
 
         if trunk is None:
             self.trunk = MultiModalFusionTrunk(
@@ -101,6 +119,7 @@ class TFTStateEncoder:
 
     def encode_scalars(self, player: Player, stage: int, round_in_stage: int) -> torch.Tensor:
         """Encode 8 continuous match state scalars."""
+        total_items = sum(len(unit.items) for unit in player.board.values())
         scalars = torch.tensor(
             [
                 player.health / 100.0,
@@ -110,7 +129,7 @@ class TFTStateEncoder:
                 stage / 10.0,
                 round_in_stage / 10.0,
                 player.board_unit_count / 10.0,
-                len(player.item_bench) / 10.0,
+                total_items / 10.0,
             ],
             dtype=torch.float32,
             device=self.device,
@@ -125,11 +144,11 @@ class TFTStateEncoder:
         round_in_stage: int,
         target_z: np.ndarray | torch.Tensor | None = None,
     ) -> tuple[np.ndarray, torch.Tensor, torch.Tensor]:
-        """Construct full 704D state vector o_t = [s_t (320), shop_feat (64), bench_feat (64), target_z (256)].
+        """Construct full 768D state vector o_t = [s_t (384), shop_feat (64), bench_feat (64), target_z (256)].
 
         Returns:
-            o_t_np: (704,) np.ndarray float32
-            s_t: (320,) torch.Tensor
+            o_t_np: (768,) np.ndarray float32
+            s_t: (384,) torch.Tensor
             h_board: (256,) torch.Tensor
         """
         c_ids, stars, items, traits = self.encode_board_tensors(player)
