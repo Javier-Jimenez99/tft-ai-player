@@ -6,9 +6,9 @@ from pathlib import Path
 import paramiko
 
 # Load .env credentials
-RPI_HOST = "raspberrypi.local"
-RPI_USER = "javi"
-RPI_PASSWORD = "sal739567"
+RPI_HOST = os.environ.get("RPI_HOST", "raspberrypi.local")
+RPI_USER = os.environ.get("RPI_USER", "javi")
+RPI_PASSWORD = os.environ.get("RPI_PASSWORD", "")
 
 env_path = Path(__file__).resolve().parent.parent / ".env"
 if env_path.exists():

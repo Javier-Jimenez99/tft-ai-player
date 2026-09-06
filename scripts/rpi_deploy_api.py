@@ -1,15 +1,30 @@
+import os
 import time
+from pathlib import Path
 import paramiko
+
+# Load .env
+env_path = Path(__file__).resolve().parent.parent / ".env"
+RPI_PASSWORD = os.environ.get("RPI_PASSWORD", "")
+RPI_HOST = os.environ.get("RPI_HOST", "raspberrypi.local")
+RPI_USER = os.environ.get("RPI_USER", "javi")
+if env_path.exists():
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        if "=" in line and not line.startswith("#"):
+            k, v = line.strip().split("=", 1)
+            if k == "RPI_PASSWORD": RPI_PASSWORD = v.strip("'\"")
+            elif k == "RPI_HOST": RPI_HOST = v.strip("'\"")
+            elif k == "RPI_USER": RPI_USER = v.strip("'\"")
 
 ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-print("Connecting to raspberrypi.local...")
-ssh.connect("raspberrypi.local", username="javi", password="sal739567", timeout=10)
+print(f"Connecting to {RPI_HOST}...")
+ssh.connect(RPI_HOST, username=RPI_USER, password=RPI_PASSWORD, timeout=10)
 
 def run_remote(cmd, sudo=False):
     print(f"\n>>> {cmd}")
     if sudo:
-        stdin, stdout, stderr = ssh.exec_command(f"echo sal739567 | sudo -S {cmd}")
+        stdin, stdout, stderr = ssh.exec_command(f"echo {RPI_PASSWORD} | sudo -S {cmd}")
     else:
         stdin, stdout, stderr = ssh.exec_command(cmd)
     out = stdout.read().decode().strip()
