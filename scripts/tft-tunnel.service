@@ -1,0 +1,30 @@
+[Unit]
+Description=TFT AI Mobile Remote Access (Cloudflare Tunnel)
+After=network-online.target tft-monitor.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=javi
+Group=javi
+WorkingDirectory=/home/javi/tft-ai-player
+
+EnvironmentFile=-/home/javi/tft-ai-player/.env
+Environment=PYTHONPATH=/home/javi/tft-ai-player/src
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=/home/javi/tft-venv/bin/python /home/javi/tft-ai-player/scripts/run_tunnel.py
+
+Restart=always
+RestartSec=5
+
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tft-tunnel
+
+[Install]
+WantedBy=multi-user.target

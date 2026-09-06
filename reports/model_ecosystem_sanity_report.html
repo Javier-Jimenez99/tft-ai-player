@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TFT-AI Model Ecosystem Sanity & Benchmark Audit</title>
+    <style>
+        :root {
+            --bg-primary: #0b0f19;
+            --bg-secondary: #121a2d;
+            --bg-card: #18233c;
+            --border: #263554;
+            --text-main: #e2e8f0;
+            --text-dim: #94a3b8;
+            --accent: #3b82f6;
+            --pass-bg: #064e3b;
+            --pass-text: #34d399;
+            --warn-bg: #78350f;
+            --warn-text: #fbbf24;
+            --fail-bg: #7f1d1d;
+            --fail-text: #f87171;
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-main);
+            padding: 2rem;
+            line-height: 1.5;
+        }
+        .container {
+            max-width: 1300px;
+            margin: 0 auto;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 2rem;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 2rem;
+        }
+        h1 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: #f8fafc;
+        }
+        .meta-info {
+            font-size: 0.875rem;
+            color: var(--text-dim);
+            margin-top: 0.25rem;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .stat-card {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1.25rem;
+        }
+        .stat-title {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-dim);
+            font-weight: 600;
+        }
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-top: 0.25rem;
+            color: #f8fafc;
+        }
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.65rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+        .badge-sm {
+            padding: 0.15rem 0.45rem;
+            font-size: 0.7rem;
+        }
+        .status-pass {
+            background-color: var(--pass-bg);
+            color: var(--pass-text);
+            border: 1px solid var(--pass-text);
+        }
+        .status-warn {
+            background-color: var(--warn-bg);
+            color: var(--warn-text);
+            border: 1px solid var(--warn-text);
+        }
+        .status-fail {
+            background-color: var(--fail-bg);
+            color: var(--fail-text);
+            border: 1px solid var(--fail-text);
+        }
+        .model-card {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 1rem;
+            margin-bottom: 1.25rem;
+        }
+        .card-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #ffffff;
+        }
+        .card-subtitle {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            margin-top: 0.2rem;
+        }
+        .diagnosis-box {
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1.25rem;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+        .diag-fail {
+            background-color: rgba(127, 29, 29, 0.4);
+            border-left: 4px solid var(--fail-text);
+            color: #fecaca;
+        }
+        .diag-warn {
+            background-color: rgba(120, 53, 15, 0.4);
+            border-left: 4px solid var(--warn-text);
+            color: #fde68a;
+        }
+        .section-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--accent);
+            margin-bottom: 0.75rem;
+        }
+        .metrics-container {
+            margin-bottom: 1.25rem;
+        }
+        .metrics-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .metric-pill {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.35rem 0.75rem;
+            font-size: 0.85rem;
+            display: flex;
+            gap: 0.4rem;
+        }
+        .table-container {
+            overflow-x: auto;
+        }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.875rem;
+            text-align: left;
+        }
+        .data-table th {
+            background-color: var(--bg-card);
+            color: var(--text-dim);
+            padding: 0.75rem 1rem;
+            font-weight: 600;
+            border-bottom: 1px solid var(--border);
+        }
+        .data-table td {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid rgba(38, 53, 84, 0.5);
+            vertical-align: middle;
+        }
+        .data-table tr:hover {
+            background-color: rgba(24, 35, 60, 0.4);
+        }
+        .font-mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        }
+        .font-medium { font-weight: 500; }
+        .font-semibold { font-weight: 600; }
+        .text-dim { color: var(--text-dim); }
+        .text-sm { font-size: 0.8rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>TFT-AI Model Ecosystem Sanity & Benchmark Audit</h1>
+                <div class="meta-info">
+                    Timestamp: <strong>2026-09-06T19:33:51Z</strong> | Device: <strong>cuda</strong> | Audit Runtime: <strong>4.21s</strong>
+                </div>
+            </div>
+            <div>
+                <span class="badge status-fail" style="font-size: 1rem; padding: 0.5rem 1rem;">
+                    Ecosystem Health: 96.3%
+                </span>
+            </div>
+        </header>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-title">Models Audited</div>
+                <div class="stat-value">7</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Axiomatic Tests Executed</div>
+                <div class="stat-value">27</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Tests Passed</div>
+                <div class="stat-value" style="color: var(--pass-text);">26</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Critical Law Violations</div>
+                <div class="stat-value" style="color: var(--fail-text);">1</div>
+            </div>
+        </div>
+
+        
+            <div class="model-card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">MultiModalFusionTrunk</h2>
+                        <div class="card-subtitle font-mono">models/trunk/trunk_best.pt</div>
+                    </div>
+                    <div><span class="badge status-pass">PASS</span></div>
+                </div>
+                
+                
+                <div class="metrics-container">
+                    <div class="section-title">Empirical Replay Metrics</div>
+                    <div class="metrics-grid">
+                    <div class="metric-pill">
+                        <span class="text-dim">Champ embed norm:</span>
+                        <span class="font-mono font-semibold">126.55</span>
+                    </div>
+                
+                    <div class="metric-pill">
+                        <span class="text-dim">Star embed norm:</span>
+                        <span class="font-mono font-semibold">5.44</span>
+                    </div>
+                
+                    <div class="metric-pill">
+                        <span class="text-dim">Item embed norm:</span>
+                        <span class="font-mono font-semibold">96.6</span>
+                    </div>
+                
+                    <div class="metric-pill">
+                        <span class="text-dim">Item embed std:</span>
+                        <span class="font-mono font-semibold">0.9843</span>
+                    </div>
+                
+                    <div class="metric-pill">
+                        <span class="text-dim">Fused dim:</span>
+                        <span class="font-mono font-semibold">384</span>
+                    </div>
+                </div>
+                </div>
+            
+                <div class="table-container">
+                    <div class="section-title">Deterministic Axiomatic Law Tests</div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Test Name</th>
+                                <th>Description</th>
+                                <th>Physical TFT Law</th>
+                                <th>Expected</th>
+                                <th>Actual Measured</th>
+                                <th>Verdict</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            
+                <tr>
+                    <td class="font-medium">Champion Distinction Law</td>
+                    <td class="text-dim text-sm">Different champions must have separated embedding vectors in Champ2Vec</td>
+                    <td class="font-mono text-sm">cos_sim(champ_i, champ_j) < 0.85</td>
+                    <td class="font-mono text-sm">< 0.850</td>
+                    <td class="font-mono text-sm font-semibold">-0.0318</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Star Progression Monotonicity</td>
+                    <td class="text-dim text-sm">Upgrades must progress along the star embedding manifold</td>
+                    <td class="font-mono text-sm">dist(1*, 2*) < dist(1*, 3*)</td>
+                    <td class="font-mono text-sm">d(1,2) < d(1,3) (actual: 1.27 vs 2.39)</td>
+                    <td class="font-mono text-sm font-semibold">1.27 < 2.39</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Item Vector Divergence Law</td>
+                    <td class="text-dim text-sm">A board with 9 completed items must cause significant vector separation from 0 items</td>
+                    <td class="font-mono text-sm">cos_sim(h_no_items, h_full_items) < 0.90</td>
+                    <td class="font-mono text-sm">< 0.900</td>
+                    <td class="font-mono text-sm font-semibold">cos_sim = 0.8279 (dist = 3.70)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        
+
+            <div class="model-card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">DeepSiameseCombatNet</h2>
+                        <div class="card-subtitle font-mono">models\round_winner\deep_siamese_combat_best.pt</div>
+                    </div>
+                    <div><span class="badge status-pass">PASS</span></div>
+                </div>
+                
+                <div class="diagnosis-box diag-warn">
+                    <strong>Diagnosis & Root Cause:</strong> All combat sanity laws passed.
+                </div>
+            
+                
+                <div class="metrics-container">
+                    <div class="section-title">Empirical Replay Metrics</div>
+                    <div class="metrics-grid">
+                    <div class="metric-pill">
+                        <span class="text-dim">Replay samples evaluated:</span>
+                        <span class="font-mono font-semibold">90</span>
+                    </div>
+                
+                    <div class="metric-pill">
+                        <span class="text-dim">Mean win probability vs human boards:</span>
+                        <span class="font-mono font-semibold">80.17%</span>
+                    </div>
+                
+                    <div class="metric-pill">
+                        <span class="text-dim">Std win probability:</span>
+                        <span class="font-mono font-semibold">14.90%</span>
+                    </div>
+                </div>
+                </div>
+            
+                <div class="table-container">
+                    <div class="section-title">Deterministic Axiomatic Law Tests</div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Test Name</th>
+                                <th>Description</th>
+                                <th>Physical TFT Law</th>
+                                <th>Expected</th>
+                                <th>Actual Measured</th>
+                                <th>Verdict</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            
+                <tr>
+                    <td class="font-medium">Mirror Match Identity Law</td>
+                    <td class="text-dim text-sm">P(Board A beats Board A) must strictly evaluate to 50.0%</td>
+                    <td class="font-mono text-sm">|P(A vs A) - 50.0%| <= 2.0%</td>
+                    <td class="font-mono text-sm">50.00% +/- 2.0%</td>
+                    <td class="font-mono text-sm font-semibold">50.00%</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Anti-Symmetry Law</td>
+                    <td class="text-dim text-sm">Combat resolver must be mathematically anti-symmetric across focal/opponent swap</td>
+                    <td class="font-mono text-sm">P(A vs B) + P(B vs A) == 100.0%</td>
+                    <td class="font-mono text-sm">100.00% +/- 1.0%</td>
+                    <td class="font-mono text-sm font-semibold">100.00% (7.2% + 92.8%)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Unit Count Dominance Law</td>
+                    <td class="text-dim text-sm">9 units (2-star) must overwhelmingly crush 3 units (1-star)</td>
+                    <td class="font-mono text-sm">P(9 Units vs 3 Units) >= 95.0%</td>
+                    <td class="font-mono text-sm">>= 95.00%</td>
+                    <td class="font-mono text-sm font-semibold">99.87%</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Star Level Dominance Law</td>
+                    <td class="text-dim text-sm">Full 3-star composition must consistently defeat an identical 1-star composition</td>
+                    <td class="font-mono text-sm">P(3-Star vs 1-Star) >= 90.0%</td>
+                    <td class="font-mono text-sm">>= 90.00%</td>
+                    <td class="font-mono text-sm font-semibold">96.30%</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Item Advantage Law</td>
+                    <td class="text-dim text-sm">An identical composition equipped with 9 completed meta items must overwhelmingly defeat 0 items</td>
+                    <td class="font-mono text-sm">P(9 Items vs 0 Items) >= 80.0%</td>
+                    <td class="font-mono text-sm">>= 80.00%</td>
+                    <td class="font-mono text-sm font-semibold">92.83%</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Champion Cost Dominance Law</td>
+                    <td class="text-dim text-sm">Full 4-cost / 5-cost composition must overpower a 1-cost composition of equal stars</td>
+                    <td class="font-mono text-sm">P(High Cost vs Low Cost) >= 75.0%</td>
+                    <td class="font-mono text-sm">>= 75.00%</td>
+                    <td class="font-mono text-sm font-semibold">75.31%</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        
+
+            <div class="model-card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">BoardQualityNet</h2>
+                        <div class="card-subtitle font-mono">models\board_evaluator\board_quality_best.pt</div>
+                    </div>
+                    <div><span class="badge status-pass">PASS</span></div>
+                </div>
+                
+                
+                <div class="table-container">
+                    <div class="section-title">Deterministic Axiomatic Law Tests</div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Test Name</th>
+                                <th>Description</th>
+                                <th>Physical TFT Law</th>
+                                <th>Expected</th>
+                                <th>Actual Measured</th>
+                                <th>Verdict</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            
+                <tr>
+                    <td class="font-medium">Endgame Composition Separation Law</td>
+                    <td class="text-dim text-sm">A capped Stage 5 Level 9 board must predict a substantially superior finish than an early weak board</td>
+                    <td class="font-mono text-sm">E[Place_weak] - E[Place_capped] >= 2.0 places</td>
+                    <td class="font-mono text-sm">>= +2.00 places difference</td>
+                    <td class="font-mono text-sm font-semibold">+2.37 places (Capped: 1.74, Weak: 4.11)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Star Upgrade Placement Benefit Law</td>
+                    <td class="text-dim text-sm">Upgrading an entire board from 1-star to 3-star must meaningfully improve placement</td>
+                    <td class="font-mono text-sm">E[Place_1star] - E[Place_3star] >= 0.50 places</td>
+                    <td class="font-mono text-sm">>= +0.50 places improvement</td>
+                    <td class="font-mono text-sm font-semibold">+0.86 places (1*: 3.87 -> 3*: 3.01)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Itemization Placement Benefit Law</td>
+                    <td class="text-dim text-sm">Equipping 9 completed meta items on carries/tanks must improve expected placement</td>
+                    <td class="font-mono text-sm">E[Place_naked] - E[Place_items] >= 0.40 places</td>
+                    <td class="font-mono text-sm">>= +0.40 places improvement</td>
+                    <td class="font-mono text-sm font-semibold">+0.52 places (Naked: 3.25 -> Full: 2.72)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Health Buffer Survival Law</td>
+                    <td class="text-dim text-sm">At identical boards, a player with 100 HP must have a strictly higher Top-4 probability than a player at 12 HP</td>
+                    <td class="font-mono text-sm">P(Top-4 | 100 HP) - P(Top-4 | 12 HP) >= 10.0%</td>
+                    <td class="font-mono text-sm">>= +10.00% higher survival</td>
+                    <td class="font-mono text-sm font-semibold">+64.5% points (100 HP: 99.1%, 12 HP: 34.6%)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        
+
+            <div class="model-card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">StateTransitionPredictor (World Model)</h2>
+                        <div class="card-subtitle font-mono">models\transition_predictor\predictor_best.pt</div>
+                    </div>
+                    <div><span class="badge status-pass">PASS</span></div>
+                </div>
+                
+                
+                <div class="table-container">
+                    <div class="section-title">Deterministic Axiomatic Law Tests</div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Test Name</th>
+                                <th>Description</th>
+                                <th>Physical TFT Law</th>
+                                <th>Expected</th>
+                                <th>Actual Measured</th>
+                                <th>Verdict</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            
+                <tr>
+                    <td class="font-medium">Non-Identity Dynamics Law</td>
+                    <td class="text-dim text-sm">World Model must predict non-zero transition dynamics (must not output identity copy of input)</td>
+                    <td class="font-mono text-sm">cos_sim(s_t, s_hat_{t+1}) < 0.9995</td>
+                    <td class="font-mono text-sm">< 0.9995 (genuine transition)</td>
+                    <td class="font-mono text-sm font-semibold">0.93567</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Autoregressive Rollout Stability Law</td>
+                    <td class="text-dim text-sm">Multi-step recursive lookahead must not explode towards infinity or collapse to zero</td>
+                    <td class="font-mono text-sm">0.50 <= ||s_{t+5}|| / ||s_t|| <= 2.00</td>
+                    <td class="font-mono text-sm">[0.50, 2.00]</td>
+                    <td class="font-mono text-sm font-semibold">0.987x norm ratio</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Residual Transition Magnitude Law</td>
+                    <td class="text-dim text-sm">Predicted change delta must have measurable non-zero Euclidean magnitude</td>
+                    <td class="font-mono text-sm">||s_hat_{t+1} - s_t|| > 0.01</td>
+                    <td class="font-mono text-sm">> 0.010</td>
+                    <td class="font-mono text-sm font-semibold">3.4793</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        
+
+            <div class="model-card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">Z-Index Macro Composition Centroids</h2>
+                        <div class="card-subtitle font-mono">models\clustering\z_index.pt</div>
+                    </div>
+                    <div><span class="badge status-pass">PASS</span></div>
+                </div>
+                
+                
+                <div class="metrics-container">
+                    <div class="section-title">Empirical Replay Metrics</div>
+                    <div class="metrics-grid">
+                    <div class="metric-pill">
+                        <span class="text-dim">Cluster count k:</span>
+                        <span class="font-mono font-semibold">8</span>
+                    </div>
+                
+                    <div class="metric-pill">
+                        <span class="text-dim">Latent feature dim:</span>
+                        <span class="font-mono font-semibold">256</span>
+                    </div>
+                
+                    <div class="metric-pill">
+                        <span class="text-dim">Mean centroid norm:</span>
+                        <span class="font-mono font-semibold">0.533</span>
+                    </div>
+                </div>
+                </div>
+            
+                <div class="table-container">
+                    <div class="section-title">Deterministic Axiomatic Law Tests</div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Test Name</th>
+                                <th>Description</th>
+                                <th>Physical TFT Law</th>
+                                <th>Expected</th>
+                                <th>Actual Measured</th>
+                                <th>Verdict</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            
+                <tr>
+                    <td class="font-medium">Archetype Orthogonality Law</td>
+                    <td class="text-dim text-sm">Target archetypes must represent distinctly separated strategic comps</td>
+                    <td class="font-mono text-sm">max_{i != j} cos_sim(z_i, z_j) < 0.85</td>
+                    <td class="font-mono text-sm">< 0.850</td>
+                    <td class="font-mono text-sm font-semibold">0.3885 (mean sim = -0.1353)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Centroid Non-Degeneracy Law</td>
+                    <td class="text-dim text-sm">All k cluster centroids must possess non-trivial vector magnitude</td>
+                    <td class="font-mono text-sm">min_k ||z_k|| > 0.10</td>
+                    <td class="font-mono text-sm">> 0.100</td>
+                    <td class="font-mono text-sm font-semibold">0.4684</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Semantic Composition Alignment Law</td>
+                    <td class="text-dim text-sm">Canonical tournament compositions must project positively into the latent archetype subspace</td>
+                    <td class="font-mono text-sm">max_k cos_sim(h_{comp}, z_k) > 0.15</td>
+                    <td class="font-mono text-sm">> 0.150 for meta comps</td>
+                    <td class="font-mono text-sm font-semibold">Comp A max sim = 0.3469, Comp B max sim = 0.4592</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        
+
+            <div class="model-card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">EloRegressor (Skill Rating Predictor)</h2>
+                        <div class="card-subtitle font-mono">models\elo_predictor\elo_regressor_player_level.pkl</div>
+                    </div>
+                    <div><span class="badge status-pass">PASS</span></div>
+                </div>
+                
+                <div class="diagnosis-box diag-warn">
+                    <strong>Diagnosis & Root Cause:</strong> All Elo regressor sanity laws passed.
+                </div>
+            
+                
+                <div class="table-container">
+                    <div class="section-title">Deterministic Axiomatic Law Tests</div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Test Name</th>
+                                <th>Description</th>
+                                <th>Physical TFT Law</th>
+                                <th>Expected</th>
+                                <th>Actual Measured</th>
+                                <th>Verdict</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            
+                <tr>
+                    <td class="font-medium">Model Object & Inference Interface</td>
+                    <td class="text-dim text-sm">MatchEloRegressor deserializes cleanly and exposes competitive predict_match interface</td>
+                    <td class="font-mono text-sm">hasattr(model, 'predict_match')</td>
+                    <td class="font-mono text-sm">True</td>
+                    <td class="font-mono text-sm font-semibold">hasattr = True</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Competitive Tempo Monotonicity Law</td>
+                    <td class="text-dim text-sm">Aggressive Challenger tempo must predict strictly higher rating than passive low-tier play</td>
+                    <td class="font-mono text-sm">Elo(Challenger Tempo) - Elo(Iron Tempo) >= +800</td>
+                    <td class="font-mono text-sm">>= +800 ELO separation</td>
+                    <td class="font-mono text-sm font-semibold">Delta = +1501 ELO (Challenger: 2895 [MASTER] vs Iron: 1394 [GOLD])</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Solution Space OOD Detection Law</td>
+                    <td class="text-dim text-sm">Valid human gameplay must be flagged in-distribution, aberrant bot trajectories flagged as outliers</td>
+                    <td class="font-mono text-sm">Human == Inlier and Aberrant Bot == Outlier</td>
+                    <td class="font-mono text-sm">Human inlier and Bot outlier</td>
+                    <td class="font-mono text-sm font-semibold">Human inlier=True (98.8%), Bot outlier=True (Dist=32.5)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Competitive Elo Range Boundedness Law</td>
+                    <td class="text-dim text-sm">Predicted Elo ratings must remain within realistic ranked ladder bounds [100, 4600]</td>
+                    <td class="font-mono text-sm">100.0 <= Elo <= 4600.0</td>
+                    <td class="font-mono text-sm">[100, 4600]</td>
+                    <td class="font-mono text-sm font-semibold">Challenger: 2895, Iron: 1394</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        
+
+            <div class="model-card">
+                <div class="card-header">
+                    <div>
+                        <h2 class="card-title">TFTActorCritic (AlphaStar V6 Gen 300)</h2>
+                        <div class="card-subtitle font-mono">D:\tft-winner-data\set18\models\rl\checkpoints\ppo_alphastar_v6\gen_0300\training_state.pt</div>
+                    </div>
+                    <div><span class="badge status-fail">FAIL</span></div>
+                </div>
+                
+                <div class="diagnosis-box diag-fail">
+                    <strong>Diagnosis & Root Cause:</strong> TFTActorCritic fails the following laws: Critic Item Sensitivity Law.
+                </div>
+            
+                
+                <div class="table-container">
+                    <div class="section-title">Deterministic Axiomatic Law Tests</div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Test Name</th>
+                                <th>Description</th>
+                                <th>Physical TFT Law</th>
+                                <th>Expected</th>
+                                <th>Actual Measured</th>
+                                <th>Verdict</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            
+                <tr>
+                    <td class="font-medium">Action Mask Enforcement Law</td>
+                    <td class="text-dim text-sm">Illegal masked actions must receive mathematically zero probability mass</td>
+                    <td class="font-mono text-sm">sum_{a in masked} P(a) == 0.0000</td>
+                    <td class="font-mono text-sm">0.000000</td>
+                    <td class="font-mono text-sm font-semibold">0.00000000</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Health Monotonicity Value Law</td>
+                    <td class="text-dim text-sm">Higher health buffer must reflect higher expected cumulative return V(s)</td>
+                    <td class="font-mono text-sm">V(s | 100 HP) > V(s | 12 HP)</td>
+                    <td class="font-mono text-sm">V(100 HP) > V(12 HP)</td>
+                    <td class="font-mono text-sm font-semibold">Delta = +1.5685 (100 HP: +5.444 vs 12 HP: +3.876)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Board Size Value Monotonicity Law</td>
+                    <td class="text-dim text-sm">A 9-unit full board must evaluate to a strictly higher expected return than a 3-unit board</td>
+                    <td class="font-mono text-sm">V(s | 9 Units) > V(s | 3 Units)</td>
+                    <td class="font-mono text-sm">V(9 Units) > V(3 Units)</td>
+                    <td class="font-mono text-sm font-semibold">Delta = +1.6204 (9 Units: +5.186 vs 3 Units: +3.566)</td>
+                    <td><span class="badge badge-sm status-pass">PASS</span></td>
+                </tr>
+            
+                <tr>
+                    <td class="font-medium">Critic Item Sensitivity Law</td>
+                    <td class="text-dim text-sm">The critic value function V(s) must appreciate the massive combat value of 9 completed items</td>
+                    <td class="font-mono text-sm">V(s | 9 Items) - V(s | 0 Items) > +0.10</td>
+                    <td class="font-mono text-sm">>= +0.100 higher value</td>
+                    <td class="font-mono text-sm font-semibold">-0.0847 (Naked: +5.093 -> Items: +5.008)</td>
+                    <td><span class="badge badge-sm status-fail">FAIL</span></td>
+                </tr>
+            
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        
+    </div>
+</body>
+</html>

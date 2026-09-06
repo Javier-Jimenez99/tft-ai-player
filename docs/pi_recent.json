@@ -1,0 +1,454 @@
+{
+  "matches": [
+    {
+      "match_uuid": "cfba63ac-a488-4717-85cc-5d30ab03ab56",
+      "tier": "MASTER",
+      "focal_player": "Arch",
+      "elo_rating": 3050,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:10:32.768662+00:00"
+    },
+    {
+      "match_uuid": "1d34c88c-975b-4bfc-9eb8-df587f4eb438",
+      "tier": "PLATINUM",
+      "focal_player": "\ub85d \ub2ec",
+      "elo_rating": 2174,
+      "placement": 4,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:10:29.074836+00:00"
+    },
+    {
+      "match_uuid": "7677b17b-ba4e-45ce-b3b5-7964d4c64a80",
+      "tier": "GRANDMASTER",
+      "focal_player": "Mestre da Bocha",
+      "elo_rating": 4029,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:10:25.742372+00:00"
+    },
+    {
+      "match_uuid": "ea83542b-0637-4869-ae66-659963d9f886",
+      "tier": "MASTER",
+      "focal_player": "Arch",
+      "elo_rating": 3050,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:10:21.536182+00:00"
+    },
+    {
+      "match_uuid": "38a943da-d420-456f-97c6-cf8ecdc1105c",
+      "tier": "EMERALD",
+      "focal_player": "kuran0827",
+      "elo_rating": 2369,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:10:19.241945+00:00"
+    },
+    {
+      "match_uuid": "b44fc81d-4523-4766-a9dd-19d26b2e59e2",
+      "tier": "DIAMOND",
+      "focal_player": "kuran0827",
+      "elo_rating": 2884,
+      "placement": 3,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:10:16.778112+00:00"
+    },
+    {
+      "match_uuid": "15f0d99e-9cb6-4941-9c70-53eebaab8380",
+      "tier": "BRONZE",
+      "focal_player": "\uce90\uc2ac\ubca8",
+      "elo_rating": 923,
+      "placement": 3,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:10:14.431019+00:00"
+    },
+    {
+      "match_uuid": "3a89b110-e3c0-47e3-942d-beb8f826bf14",
+      "tier": "MASTER",
+      "focal_player": "Arch",
+      "elo_rating": 3050,
+      "placement": 1,
+      "is_top1": true,
+      "downloaded_at": "2026-09-06T14:10:09.631481+00:00"
+    },
+    {
+      "match_uuid": "2b9f8e32-8fc3-41dd-9cdd-06681159b15f",
+      "tier": "DIAMOND",
+      "focal_player": "kuran0827",
+      "elo_rating": 2911,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:10:07.113231+00:00"
+    },
+    {
+      "match_uuid": "4fed081f-e78b-4578-966b-3cbcae7a6287",
+      "tier": "GRANDMASTER",
+      "focal_player": "Mestre da Bocha",
+      "elo_rating": 4105,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:10:04.601542+00:00"
+    },
+    {
+      "match_uuid": "01441664-0458-4295-b6e9-c323dc636c2a",
+      "tier": "PLATINUM",
+      "focal_player": "\ub85d \ub2ec",
+      "elo_rating": 2119,
+      "placement": 4,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:10:02.015420+00:00"
+    },
+    {
+      "match_uuid": "2721a504-aa49-4c4d-9145-06e9ab02d440",
+      "tier": "EMERALD",
+      "focal_player": "kuran0827",
+      "elo_rating": 2529,
+      "placement": 4,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:09:59.593935+00:00"
+    },
+    {
+      "match_uuid": "52fd2507-6b95-4737-b30b-58ee59436bd4",
+      "tier": "MASTER",
+      "focal_player": "SHiRoxK",
+      "elo_rating": 3050,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:09:54.873477+00:00"
+    },
+    {
+      "match_uuid": "6790fa74-92ff-4415-b957-2cffc6bdf132",
+      "tier": "DIAMOND",
+      "focal_player": "kuran0827",
+      "elo_rating": 2935,
+      "placement": 1,
+      "is_top1": true,
+      "downloaded_at": "2026-09-06T14:09:53.933857+00:00"
+    },
+    {
+      "match_uuid": "1b906f7f-1533-46f1-9575-9f13165ec952",
+      "tier": "GRANDMASTER",
+      "focal_player": "fandel",
+      "elo_rating": 3909,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:09:51.325492+00:00"
+    },
+    {
+      "match_uuid": "030c94e2-7d75-4856-952c-9966f9c76653",
+      "tier": "EMERALD",
+      "focal_player": "kuran0827",
+      "elo_rating": 2348,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:09:48.966335+00:00"
+    },
+    {
+      "match_uuid": "83560d20-d2f7-44b6-8409-2e6fd5aeff08",
+      "tier": "MASTER",
+      "focal_player": "SHiRoxK",
+      "elo_rating": 3050,
+      "placement": 1,
+      "is_top1": true,
+      "downloaded_at": "2026-09-06T14:09:46.459660+00:00"
+    },
+    {
+      "match_uuid": "5fa2d049-4ab9-42c7-a9e6-0a2860d9f898",
+      "tier": "PLATINUM",
+      "focal_player": "\ub85d \ub2ec",
+      "elo_rating": 2003,
+      "placement": 4,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:09:45.315022+00:00"
+    },
+    {
+      "match_uuid": "2e2cc9f5-d890-4a09-9412-87744d64a5aa",
+      "tier": "DIAMOND",
+      "focal_player": "kuran0827",
+      "elo_rating": 2953,
+      "placement": 4,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:09:44.266015+00:00"
+    },
+    {
+      "match_uuid": "215e5a15-c388-4664-ac4e-4227a9143887",
+      "tier": "GRANDMASTER",
+      "focal_player": "fandel",
+      "elo_rating": 3972,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:09:41.402828+00:00"
+    },
+    {
+      "match_uuid": "67f28d9c-277e-40f2-8c2f-b50064b5d725",
+      "tier": "MASTER",
+      "focal_player": "SHiRoxK",
+      "elo_rating": 3050,
+      "placement": 1,
+      "is_top1": true,
+      "downloaded_at": "2026-09-06T14:09:38.669249+00:00"
+    },
+    {
+      "match_uuid": "8e002bc2-516b-4086-b648-4fb0478dcd94",
+      "tier": "EMERALD",
+      "focal_player": "kuran0827",
+      "elo_rating": 2471,
+      "placement": 1,
+      "is_top1": true,
+      "downloaded_at": "2026-09-06T14:09:37.478927+00:00"
+    },
+    {
+      "match_uuid": "b480d9dd-b5e6-499d-a6aa-c6bb8552c2bf",
+      "tier": "DIAMOND",
+      "focal_player": "kuran0827",
+      "elo_rating": 2961,
+      "placement": 3,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:09:35.178118+00:00"
+    },
+    {
+      "match_uuid": "40cc6fd6-1efb-4f0a-be4a-abda0e153c00",
+      "tier": "MASTER",
+      "focal_player": "SHiRoxK",
+      "elo_rating": 3050,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:09:32.027735+00:00"
+    },
+    {
+      "match_uuid": "e7ee787b-abea-411e-be7e-93e20a499ffc",
+      "tier": "PLATINUM",
+      "focal_player": "\ub85d \ub2ec",
+      "elo_rating": 2004,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:09:29.426320+00:00"
+    },
+    {
+      "match_uuid": "4f34cefe-8340-42cf-a647-bfab49ebdfe2",
+      "tier": "GRANDMASTER",
+      "focal_player": "fandel",
+      "elo_rating": 3894,
+      "placement": 4,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:09:26.696238+00:00"
+    },
+    {
+      "match_uuid": "fe0b1fc4-fa46-4e15-8855-7ddc49d5bd79",
+      "tier": "EMERALD",
+      "focal_player": "kuran0827",
+      "elo_rating": 2582,
+      "placement": 1,
+      "is_top1": true,
+      "downloaded_at": "2026-09-06T14:09:23.730459+00:00"
+    },
+    {
+      "match_uuid": "cc22df0c-3a8b-4116-8a31-eb0386049960",
+      "tier": "DIAMOND",
+      "focal_player": "kuran0827",
+      "elo_rating": 2980,
+      "placement": 3,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:09:19.805895+00:00"
+    },
+    {
+      "match_uuid": "27620315-3e1b-4818-b037-63703f30756b",
+      "tier": "MASTER",
+      "focal_player": "SHiRoxK",
+      "elo_rating": 3050,
+      "placement": 4,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:09:14.110572+00:00"
+    },
+    {
+      "match_uuid": "d3b32fb6-30da-43bb-9d85-5dca0060e61a",
+      "tier": "GRANDMASTER",
+      "focal_player": "fandel",
+      "elo_rating": 3900,
+      "placement": 1,
+      "is_top1": true,
+      "downloaded_at": "2026-09-06T14:09:11.349825+00:00"
+    },
+    {
+      "match_uuid": "e8e52818-971d-440b-92c7-9c0030a41439",
+      "tier": "DIAMOND",
+      "focal_player": "kuran0827",
+      "elo_rating": 2890,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:09:08.845243+00:00"
+    },
+    {
+      "match_uuid": "4a312404-14f6-41ac-b1ae-88c4c460106f",
+      "tier": "PLATINUM",
+      "focal_player": "\ub85d \ub2ec",
+      "elo_rating": 2005,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:09:06.890389+00:00"
+    },
+    {
+      "match_uuid": "68d8d042-b6a7-44a0-a1de-d975f5e1131b",
+      "tier": "EMERALD",
+      "focal_player": "kuran0827",
+      "elo_rating": 2313,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:09:05.754037+00:00"
+    },
+    {
+      "match_uuid": "79a54843-1a38-4ed6-bdac-1b62fb5aea4a",
+      "tier": "MASTER",
+      "focal_player": "SHiRoxK",
+      "elo_rating": 3050,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:09:01.176020+00:00"
+    },
+    {
+      "match_uuid": "6cafae88-b6fe-471b-8f54-d7b154d1c6fe",
+      "tier": "GRANDMASTER",
+      "focal_player": "fandel",
+      "elo_rating": 4067,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:08:57.670321+00:00"
+    },
+    {
+      "match_uuid": "feb43975-58a8-462d-8c41-fd8273b40d82",
+      "tier": "DIAMOND",
+      "focal_player": "kuran0827",
+      "elo_rating": 2753,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:08:55.559409+00:00"
+    },
+    {
+      "match_uuid": "5f2e5bf7-e6fb-4c2d-bf0f-efa846ded311",
+      "tier": "BRONZE",
+      "focal_player": "\uce90\uc2ac\ubca8",
+      "elo_rating": 844,
+      "placement": 3,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:08:53.153146+00:00"
+    },
+    {
+      "match_uuid": "696bc38b-5017-4dfe-8e23-f980fe8ecef2",
+      "tier": "MASTER",
+      "focal_player": "SHiRoxK",
+      "elo_rating": 3050,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:08:50.279550+00:00"
+    },
+    {
+      "match_uuid": "bde69880-a85b-4350-823b-2fab38d03e74",
+      "tier": "EMERALD",
+      "focal_player": "kuran0827",
+      "elo_rating": 2568,
+      "placement": 5,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:08:49.096237+00:00"
+    },
+    {
+      "match_uuid": "24383b86-2441-4e1a-bdc6-17d1d04c5143",
+      "tier": "PLATINUM",
+      "focal_player": "\ub85d \ub2ec",
+      "elo_rating": 2101,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:08:47.938789+00:00"
+    },
+    {
+      "match_uuid": "bcf9e585-aaa1-4573-9637-37fda5819709",
+      "tier": "DIAMOND",
+      "focal_player": "kuran0827",
+      "elo_rating": 2865,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:08:46.664382+00:00"
+    },
+    {
+      "match_uuid": "ceee0f8d-a060-4c92-8c97-4bcd70e315ae",
+      "tier": "MASTER",
+      "focal_player": "SHiRoxK",
+      "elo_rating": 3050,
+      "placement": 3,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:08:44.213079+00:00"
+    },
+    {
+      "match_uuid": "4da291a9-24f7-4777-89ad-f8978d24e030",
+      "tier": "GRANDMASTER",
+      "focal_player": "fandel",
+      "elo_rating": 3995,
+      "placement": 3,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:08:41.792105+00:00"
+    },
+    {
+      "match_uuid": "0e4a77e3-360e-4248-92ca-0aad594be6f8",
+      "tier": "EMERALD",
+      "focal_player": "kuran0827",
+      "elo_rating": 2568,
+      "placement": 7,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:08:39.451884+00:00"
+    },
+    {
+      "match_uuid": "9008f224-9c51-465d-aff8-11272ad58e6c",
+      "tier": "DIAMOND",
+      "focal_player": "kuran0827",
+      "elo_rating": 2883,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:08:36.832901+00:00"
+    },
+    {
+      "match_uuid": "88b6efe1-e71d-4267-bcac-ac1777094233",
+      "tier": "MASTER",
+      "focal_player": "SHiRoxK",
+      "elo_rating": 3050,
+      "placement": 1,
+      "is_top1": true,
+      "downloaded_at": "2026-09-06T14:08:34.406901+00:00"
+    },
+    {
+      "match_uuid": "d64e9afb-8d4a-4d1b-a69f-41f2e5be74e9",
+      "tier": "GRANDMASTER",
+      "focal_player": "fandel",
+      "elo_rating": 4025,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:08:33.389657+00:00"
+    },
+    {
+      "match_uuid": "db235653-71da-42d6-a132-4ef6a75c8ff7",
+      "tier": "PLATINUM",
+      "focal_player": "\ub85d \ub2ec",
+      "elo_rating": 2120,
+      "placement": 1,
+      "is_top1": true,
+      "downloaded_at": "2026-09-06T14:08:31.680331+00:00"
+    },
+    {
+      "match_uuid": "191033b3-c269-420a-bdf8-7ef3f010081f",
+      "tier": "MASTER",
+      "focal_player": "SHiRoxK",
+      "elo_rating": 3050,
+      "placement": 4,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:08:30.448110+00:00"
+    },
+    {
+      "match_uuid": "de7a86dc-222f-44a7-9616-e37c9fe15820",
+      "tier": "DIAMOND",
+      "focal_player": "kuran0827",
+      "elo_rating": 2762,
+      "placement": 2,
+      "is_top1": false,
+      "downloaded_at": "2026-09-06T14:08:26.864920+00:00"
+    }
+  ]
+}

@@ -16,6 +16,15 @@ class UnitRole(StrEnum):
     UTILITY = "UTILITY"
 
 
+class AgentArchetype(StrEnum):
+    """Strategic gameplay archetype for agent reward modulation."""
+
+    GENERALIST = "generalist"         # Standard balanced TFT macro
+    AGGRO_TEMPO = "aggro_tempo"       # Win-streaking, early leveling, immediate item slams
+    HYPER_ROLL = "hyper_roll"         # 3-star 1-cost/2-cost rerolls, deep trait verticals
+    FAST8_FLEX = "fast8_flex"         # 50g compound interest, level 8/9, 4-cost/5-cost legendaries
+
+
 @dataclass(frozen=True, slots=True)
 class ChampionDef:
     """Static definition of a champion."""

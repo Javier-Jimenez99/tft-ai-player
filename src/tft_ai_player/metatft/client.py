@@ -13,11 +13,18 @@ from urllib.request import Request, urlopen
 
 from .models import LeaderboardPlayer, MatchCandidate, TrackedTimelineCandidate, _optional_int
 
+import gzip
+import socket
+
 JsonFetcher = Callable[[str], Mapping[str, Any]]
 
 
 class MetaTftRequestError(RuntimeError):
     """Raised when a MetaTFT request cannot be completed or decoded."""
+
+    def __init__(self, message: str, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 class MetaTftClient:
@@ -43,6 +50,7 @@ class MetaTftClient:
         self.retry_count = retry_count
         self.json_fetcher = json_fetcher
         self._last_request_at = 0.0
+        socket.setdefaulttimeout(timeout_seconds)
 
     DEFAULT_LEADERBOARD_REGIONS: tuple[str, ...] = (
         "global",
@@ -236,11 +244,93 @@ class MetaTftClient:
                 candidates.append(candidate)
         return candidates
 
+    @staticmethod
+    def extract_lobby_participants(timeline: Mapping[str, Any]) -> list[tuple[str, str]]:
+        """Extract unique (summoner_name, tag_line) tuples of all players in this timeline lobby."""
+        participants: dict[str, tuple[str, str]] = {}
+        board_players = timeline.get("board_players")
+        if isinstance(board_players, list):
+            for entry in board_players:
+                if not isinstance(entry, dict):
+                    continue
+                boards = entry.get("board")
+                if isinstance(boards, list):
+                    for b in boards:
+                        if not isinstance(b, dict):
+                            continue
+                        summoner = b.get("summoner")
+                        tag_line = b.get("tag_line")
+                        if isinstance(summoner, str) and isinstance(tag_line, str):
+                            summoner = summoner.strip()
+                            tag_line = tag_line.strip()
+                            if summoner and tag_line:
+                                riot_id = f"{summoner}#{tag_line}"
+                                if riot_id not in participants:
+                                    participants[riot_id] = (summoner, tag_line)
+
+        # Extract from stage_data -> roster -> player_status
+        raw_stage = timeline.get("stage_data")
+        stage_data: Any = None
+        if isinstance(raw_stage, str):
+            try:
+                stage_data = json.loads(raw_stage)
+            except Exception:
+                stage_data = None
+        elif isinstance(raw_stage, list):
+            stage_data = raw_stage
+
+        if isinstance(stage_data, list):
+            for r_entry in stage_data:
+                if not isinstance(r_entry, dict):
+                    continue
+                roster = r_entry.get("roster")
+                if isinstance(roster, dict):
+                    p_status = roster.get("player_status")
+                    if isinstance(p_status, dict):
+                        for s_name, info in p_status.items():
+                            if isinstance(info, dict) and isinstance(s_name, str):
+                                t_line = info.get("tag_line")
+                                if t_line is not None:
+                                    s_clean = s_name.strip()
+                                    t_clean = str(t_line).strip()
+                                    if s_clean and t_clean:
+                                        riot_id = f"{s_clean}#{t_clean}"
+                                        if riot_id not in participants:
+                                            participants[riot_id] = (s_clean, t_clean)
+
+        # Fallback to focal player if participants still empty
+        if not participants:
+            focal_name = timeline.get("summoner_name")
+            focal_tag = timeline.get("tagline")
+            if isinstance(focal_name, str) and isinstance(focal_tag, str):
+                focal_name = focal_name.strip()
+                focal_tag = focal_tag.strip()
+                if focal_name and focal_tag:
+                    participants[f"{focal_name}#{focal_tag}"] = (focal_name, focal_tag)
+
+        return list(participants.values())
+
+    @staticmethod
+    def extract_player_tier(profile: Mapping[str, Any]) -> str | None:
+        """Extract the current ranked tier string (e.g. 'CHALLENGER I 995 LP', 'GOLD IV') from a profile."""
+        ranked = profile.get("ranked")
+        if isinstance(ranked, dict):
+            rating_text = ranked.get("rating_text")
+            if isinstance(rating_text, str) and rating_text.strip():
+                return rating_text.strip()
+        summoner = profile.get("summoner")
+        if isinstance(summoner, dict):
+            rating = summoner.get("rating")
+            if isinstance(rating, str) and rating.strip():
+                return rating.strip()
+        return None
+
     def _get_json(self, url: str) -> Mapping[str, Any]:
         if self.json_fetcher is not None:
             return _require_mapping(self.json_fetcher(url), url)
 
         last_error: Exception | None = None
+        last_retry_after: float | None = None
         for attempt in range(self.retry_count + 1):
             self._wait_for_rate_limit()
             headers = {
@@ -250,11 +340,22 @@ class MetaTftClient:
                     "Chrome/124.0.0.0 Safari/537.36"
                 ),
                 "Accept": "application/json, text/plain, */*",
+                "Accept-Encoding": "gzip, deflate",
+                "Referer": "https://www.metatft.com/",
+                "Origin": "https://www.metatft.com",
             }
             request = Request(url, headers=headers)
             try:
                 with urlopen(request, timeout=self.timeout_seconds) as response:
-                    payload = json.loads(response.read().decode("utf-8"))
+                    raw_bytes = response.read()
+                    content_encoding = (
+                        response.headers.get("Content-Encoding", "").lower()
+                        if hasattr(response, "headers") and response.headers
+                        else ""
+                    )
+                    if "gzip" in content_encoding or raw_bytes[:2] == b"\x1f\x8b":
+                        raw_bytes = gzip.decompress(raw_bytes)
+                    payload = json.loads(raw_bytes.decode("utf-8"))
                 return _require_mapping(payload, url)
             except (
                 HTTPError,
@@ -266,7 +367,7 @@ class MetaTftClient:
                 json.JSONDecodeError,
             ) as error:
                 last_error = error
-                if attempt == self.retry_count:
+                if attempt == self.retry_count or (isinstance(error, HTTPError) and error.code in (400, 404)):
                     break
                 if isinstance(error, HTTPError) and error.code == 429:
                     retry_after_hdr = (
@@ -280,17 +381,18 @@ class MetaTftClient:
                             retry_after_val = float(retry_after_hdr)
                         except (ValueError, TypeError):
                             pass
-                    if retry_after_val is not None and retry_after_val > 0:
-                        sleep_seconds = retry_after_val
-                    else:
-                        sleep_seconds = min(60.0, 5.0 * (2**attempt))
+                    last_retry_after = retry_after_val
+                    if retry_after_val is not None and retry_after_val > 60.0:
+                        # Server or CDN has imposed a long rate limit / lockout; fail fast rather than stalling the process
+                        break
+                    sleep_seconds = retry_after_val if retry_after_val is not None and retry_after_val > 0 else min(30.0, 2.0 * (2**attempt))
                 else:
-                    sleep_seconds = min(30.0, 2.0 * (2**attempt))
+                    sleep_seconds = min(30.0, 1.5 * (2**attempt))
 
                 time.sleep(sleep_seconds)
                 self._last_request_at = time.monotonic()
 
-        raise MetaTftRequestError(f"request failed for {url}: {last_error}") from last_error
+        raise MetaTftRequestError(f"request failed for {url}: {last_error}", retry_after=last_retry_after) from last_error
 
     def _wait_for_rate_limit(self) -> None:
         elapsed = time.monotonic() - self._last_request_at

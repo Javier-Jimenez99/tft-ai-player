@@ -7,7 +7,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any
 
-from .models import RoundObservation, RoundOutcome
+from .models import RoundObservation, RoundOutcome, normalize_tier
 
 
 class TimelineValidationError(ValueError):
@@ -146,6 +146,7 @@ def extract_pvp_rounds(
                 opponent_augments=opponent_augments,
                 outcome=outcome,
                 metatft_win_prob=metatft_win_prob,
+                tier_category=normalize_tier(effective_focal_tier or avg_match_rating),
                 input_state=_precombat_state(
                     player_board=player_board,
                     opponent_board=opponent_board,

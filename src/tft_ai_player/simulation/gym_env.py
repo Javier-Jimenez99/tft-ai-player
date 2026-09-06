@@ -1,26 +1,250 @@
-"""Gymnasium reinforcement learning environment wrapper for Teamfight Tactics."""
+"""Gymnasium reinforcement learning environment for Teamfight Tactics.
+
+Implements the Gymnasium Decision MDP with:
+  - 768D invariant concatenated state observation (384D core s_t + 64D shop + 64D bench + 256D target Z)
+    - 111-action factorized discrete action space with strict pre-softmax masking
+  - Tabular calibrated LightGBM combat oracle (1,107 dims)
+  - Multi-objective reward: R_step = R_env + alpha * R_macro + beta * R_micro
+"""
 
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
+import random
+from typing import Any, Mapping
 
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
+import torch
+import torch.nn.functional as F
 
-from tft_ai_player.simulation.actions import TOTAL_DISCRETE_ACTIONS, get_action_mask
-from tft_ai_player.simulation.bots import BaseBot, StandardTempoBot
-from tft_ai_player.simulation.combat import CombatResolver, HeuristicCombatResolver
-from tft_ai_player.simulation.config import SetData, get_default_set17_data
+from tft_ai_player.embeddings.model import MultiModalFusionTrunk
+from tft_ai_player.embeddings.vocab import ChampionVocabulary, ItemVocabulary, TraitVocabulary
+from tft_ai_player.simulation.actions import (
+    TOTAL_DISCRETE_ACTIONS,
+    execute_action,
+    get_action_mask,
+)
+from tft_ai_player.simulation.bots import BaseBot, BotAlphaFast8, BotBetaHyperroll, BotGammaGreedy, RandomBot
+from tft_ai_player.simulation.combat import CombatResolver, HeuristicCombatResolver, MLCombatResolver
+from tft_ai_player.simulation.config import AgentArchetype, SetData, get_default_set17_data
 from tft_ai_player.simulation.game import TFTGame
-from tft_ai_player.simulation.observations import ObservationEncoder
+from tft_ai_player.simulation.models import ChampionInstance, Player
+
+
+class TFTStateEncoder:
+    """Extracts 768D invariant observation vector using frozen MultiModalFusionTrunk.
+
+    Obs = s_t(384) + shop_feat(64) + bench_feat(64) + z_target(256) = 768D
+    """
+
+    def __init__(
+        self,
+        set_data: SetData,
+        trunk: MultiModalFusionTrunk | None = None,
+        vocab: ChampionVocabulary | None = None,
+        item_vocab: ItemVocabulary | None = None,
+        trait_vocab: TraitVocabulary | None = None,
+        device: torch.device | None = None,
+    ) -> None:
+        self.set_data = set_data
+        self.device = device or torch.device("cpu")
+        if vocab is None:
+            v_path = Path("models/trunk/vocab.json")
+            self.vocab = ChampionVocabulary.load(v_path) if v_path.exists() else ChampionVocabulary()
+        else:
+            self.vocab = vocab
+
+        if item_vocab is None:
+            iv_path = Path("models/trunk/item_vocab.json")
+            self.item_vocab = ItemVocabulary.load(iv_path) if iv_path.exists() else ItemVocabulary()
+        else:
+            self.item_vocab = item_vocab
+
+        if trait_vocab is None:
+            tv_path = Path("models/trunk/trait_vocab.json")
+            self.trait_vocab = TraitVocabulary.load(tv_path) if tv_path.exists() else TraitVocabulary()
+        else:
+            self.trait_vocab = trait_vocab
+
+        if trunk is None:
+            self.trunk = MultiModalFusionTrunk(
+                num_champs=len(self.vocab) + 10,
+                num_items=len(self.item_vocab) + 10,
+                num_traits=len(self.trait_vocab) + 10,
+                fused_dim=384,
+            )
+            self.trunk.eval()
+        else:
+            self.trunk = trunk
+        self.trunk.to(self.device)
+        self.trunk.eval()
+
+        # Learnable / fixed projection layers for shop (160->64) and bench (64->64)
+        self.shop_proj = torch.nn.Sequential(
+            torch.nn.Linear(160, 64),
+            torch.nn.LayerNorm(64),
+            torch.nn.ReLU(),
+        ).to(self.device)
+
+        self.bench_proj = torch.nn.Sequential(
+            torch.nn.Linear(64, 64),
+            torch.nn.LayerNorm(64),
+            torch.nn.ReLU(),
+        ).to(self.device)
+
+    def encode_board_tensors(self, player: Player) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Convert player board into PyTorch tensors for trunk ingestion."""
+        board_champ_ids = torch.zeros((4, 7), dtype=torch.long, device=self.device)
+        board_star_levels = torch.zeros((4, 7), dtype=torch.long, device=self.device)
+        board_item_ids = torch.zeros((4, 7, 3), dtype=torch.long, device=self.device)
+        board_traits = torch.zeros((len(self.trait_vocab) + 10,), dtype=torch.float32, device=self.device)
+
+        for (r, c), unit in player.board.items():
+            if 0 <= r < 4 and 0 <= c < 7:
+                c_idx = self.vocab.encode(unit.champion_id)
+                board_champ_ids[r, c] = c_idx
+                board_star_levels[r, c] = unit.star_level
+                for it_slot, item_id in enumerate(unit.items[:3]):
+                    board_item_ids[r, c, it_slot] = self.item_vocab.encode(item_id)
+
+        active_traits = player.get_active_traits()
+        for trait_name, tier in active_traits.items():
+            t_idx = self.trait_vocab.encode(trait_name)
+            if t_idx < board_traits.shape[0]:
+                board_traits[t_idx] = float(tier)
+
+        return board_champ_ids, board_star_levels, board_item_ids, board_traits
+
+    def encode_scalars(self, player: Player, stage: int, round_in_stage: int) -> torch.Tensor:
+        """Encode 8 continuous match state scalars."""
+        total_items = sum(len(unit.items) for unit in player.board.values())
+        scalars = torch.tensor(
+            [
+                player.health / 100.0,
+                player.gold / 100.0,
+                player.level / 10.0,
+                player.streak / 10.0,
+                stage / 10.0,
+                round_in_stage / 10.0,
+                player.board_unit_count / 10.0,
+                total_items / 10.0,
+            ],
+            dtype=torch.float32,
+            device=self.device,
+        )
+        return scalars
+
+    @torch.no_grad()
+    def extract_state_vector(
+        self,
+        player: Player,
+        stage: int,
+        round_in_stage: int,
+        target_z: np.ndarray | torch.Tensor | None = None,
+    ) -> tuple[np.ndarray, torch.Tensor, torch.Tensor]:
+        """Construct full 768D state vector o_t = [s_t (384), shop_feat (64), bench_feat (64), target_z (256)].
+
+        Returns:
+            o_t_np: (768,) np.ndarray float32
+            s_t: (384,) torch.Tensor
+            h_board: (256,) torch.Tensor
+        """
+        c_ids, stars, items, traits = self.encode_board_tensors(player)
+        scalars = self.encode_scalars(player, stage, round_in_stage)
+
+        # 1. Core State (320D)
+        h_board = self.trunk.encode_board(
+            board_champ_ids=c_ids.unsqueeze(0),
+            board_star_levels=stars.unsqueeze(0),
+            board_item_ids=items.unsqueeze(0),
+            board_traits=traits.unsqueeze(0),
+        ).squeeze(0)  # (256D)
+
+        state_feat = self.trunk.state_mlp(scalars.unsqueeze(0)).squeeze(0)  # (64D)
+        s_t = self.trunk.fusion(torch.cat([h_board, state_feat], dim=-1).unsqueeze(0)).squeeze(0)  # (320D)
+
+        # 2. Shop State (64D)
+        shop_champ_ids = torch.zeros((5,), dtype=torch.long, device=self.device)
+        for i, cid in enumerate(player.shop.slots):
+            if cid is not None:
+                shop_champ_ids[i] = self.vocab.encode(cid)
+
+        shop_tokens = self.trunk.champ2vec(shop_champ_ids.unsqueeze(0)).view(1, -1)  # (1, 160)
+        shop_feat = self.shop_proj(shop_tokens).squeeze(0)  # (64D)
+
+        # 3. Bench State (64D)
+        bench_champ_ids = torch.zeros((9,), dtype=torch.long, device=self.device)
+        bench_stars = torch.zeros((9,), dtype=torch.long, device=self.device)
+        bench_items = torch.zeros((9, 3), dtype=torch.long, device=self.device)
+
+        for i, u in enumerate(player.bench):
+            if u is not None:
+                bench_champ_ids[i] = self.vocab.encode(u.champion_id)
+                bench_stars[i] = u.star_level
+                for slot_idx, itm in enumerate(u.items[:3]):
+                    bench_items[i, slot_idx] = self.item_vocab.encode(itm)
+
+
+        bench_tokens = self.trunk.champ2vec(
+            champ_ids=bench_champ_ids.unsqueeze(0),
+            star_levels=bench_stars.unsqueeze(0),
+            item_ids=bench_items.unsqueeze(0),
+        ).squeeze(0)  # (9, 32)
+
+        sum_pool = bench_tokens.sum(dim=0)  # (32D)
+        mean_pool = bench_tokens.mean(dim=0)  # (32D)
+        bench_deepsets = torch.cat([sum_pool, mean_pool], dim=-1).unsqueeze(0)  # (1, 64)
+        bench_feat = self.bench_proj(bench_deepsets).squeeze(0)  # (64D)
+
+        # 4. Target Z Conditioning (256D)
+        if target_z is not None:
+            if isinstance(target_z, np.ndarray):
+                z_tensor = torch.as_tensor(target_z, dtype=torch.float32, device=self.device)
+            else:
+                z_tensor = target_z.to(self.device).float()
+            if z_tensor.numel() != 256:
+                z_tensor = torch.zeros((256,), dtype=torch.float32, device=self.device)
+        else:
+            z_tensor = torch.zeros((256,), dtype=torch.float32, device=self.device)
+
+        o_t = torch.cat([s_t, shop_feat, bench_feat, z_tensor], dim=-1)
+        o_t_np = o_t.detach().cpu().numpy().astype(np.float32)
+
+        return o_t_np, s_t, h_board
+
+
+class CurriculumBotFactory:
+    """Curriculum opponent sampling from league pool and benchmark baselines."""
+
+    def __init__(
+        self,
+        generation: int = 1,
+        league: Any | None = None,
+        set_data: SetData | None = None,
+        device: torch.device | None = None,
+        active_model: Any | None = None,
+        focal_role: Any | None = None,
+        focal_agent_id: str = "main_agent_v1",
+    ) -> None:
+        self.generation = generation
+        self.league = league
+        self.set_data = set_data or get_default_set17_data()
+        self.device = device or torch.device("cpu")
+        self.active_model = active_model
+        self.focal_role = focal_role
+        self.focal_agent_id = focal_agent_id
+
+    def __call__(self) -> BaseBot:
+        if self.league and hasattr(self.league, "sample_opponent_bot"):
+            return self.league.sample_opponent_bot(self.focal_agent_id)
+        # Default fallback: Bot Alpha
+        return BotAlphaFast8()
 
 
 class TFTEnv(gym.Env):
-    """Reinforcement learning environment for training autonomous TFT agents.
-
-    Compliant with the standard Gymnasium (v1.0+) interface with invalid action masking.
-    """
+    """Gymnasium reinforcement learning environment for Teamfight Tactics (|A|=111, Obs=704D)."""
 
     metadata = {"render_modes": ["human", "ansi", "text"]}
 
@@ -28,67 +252,119 @@ class TFTEnv(gym.Env):
         self,
         set_data: SetData | None = None,
         combat_resolver: CombatResolver | None = None,
-        bot_factory: type[BaseBot] = StandardTempoBot,
-        use_flat_obs: bool = False,
+        bot_factory: Any | None = None,
+        trunk: MultiModalFusionTrunk | None = None,
+        world_model: torch.nn.Module | None = None,
+        target_z: np.ndarray | None = None,
+        z_centroids: np.ndarray | None = None,
+        sample_random_z: bool = False,
+        alpha: float = 0.0,
+        beta: float = 0.3,
+        max_actions_per_round: int = 15,
+        device: str | torch.device | None = None,
         render_mode: str | None = None,
-        max_actions_per_round: int = 50,
     ) -> None:
         super().__init__()
-
         self.set_data = set_data or get_default_set17_data()
         self.combat_resolver = combat_resolver or HeuristicCombatResolver()
-        self.bot_factory = bot_factory
-        self.use_flat_obs = use_flat_obs
-        self.render_mode = render_mode
+        self.bot_factory = bot_factory or CurriculumBotFactory(generation=1)
+        self.initial_alpha = float(alpha)
+        self.initial_beta = float(beta)
+        self.current_alpha = float(alpha)
+        self.current_beta = float(beta)
+        self.alpha = float(alpha)
+        self.beta = float(beta)
         self.max_actions_per_round = max_actions_per_round
+        self.render_mode = render_mode
+        self.target_z = target_z
+        self.z_centroids = z_centroids
+        self.sample_random_z = sample_random_z
+        self.current_target_z_index: int | None = None
 
-        self.encoder = ObservationEncoder(self.set_data)
+        self.device = torch.device(device if device else ("cuda" if torch.cuda.is_available() else "cpu"))
+        self.encoder = TFTStateEncoder(set_data=self.set_data, trunk=trunk, device=self.device)
+        self.world_model = world_model.to(self.device).eval() if world_model is not None else None
+
         self.game = TFTGame(
             set_data=self.set_data,
             combat_resolver=self.combat_resolver,
             bot_factory=self.bot_factory,
         )
 
-        self.actions_in_current_round: int = 0
-        self.last_health: int = 100
-
-        # Action Space: 1721 Discrete Actions
         self.action_space = spaces.Discrete(TOTAL_DISCRETE_ACTIONS)
+        self.observation_space = spaces.Box(
+            low=-100.0,
+            high=100.0,
+            shape=(768,),
+            dtype=np.float32,
+        )
 
-        # Observation Space
-        if self.use_flat_obs:
-            self.observation_space = spaces.Box(
-                low=0.0,
-                high=1000.0,
-                shape=(self.encoder.flat_observation_dim,),
-                dtype=np.float32,
-            )
-        else:
-            self.observation_space = spaces.Dict(
-                {
-                    "player_stats": spaces.Box(low=0.0, high=1000.0, shape=(9,), dtype=np.float32),
-                    "board": spaces.Box(low=0.0, high=500.0, shape=(28, 5), dtype=np.float32),
-                    "bench": spaces.Box(low=0.0, high=500.0, shape=(9, 5), dtype=np.float32),
-                    "item_bench": spaces.Box(low=0.0, high=500.0, shape=(10,), dtype=np.float32),
-                    "shop": spaces.Box(low=0.0, high=500.0, shape=(5,), dtype=np.float32),
-                    "opponents": spaces.Box(low=0.0, high=1000.0, shape=(7, 8), dtype=np.float32),
-                    "opponents_boards": spaces.Box(low=0.0, high=500.0, shape=(7, 28, 5), dtype=np.float32),
-                    "opponents_benches": spaces.Box(low=0.0, high=500.0, shape=(7, 9, 5), dtype=np.float32),
-                    "pool_counts": spaces.Box(low=0.0, high=100.0, shape=(self.encoder.num_champs,), dtype=np.float32),
-                    "action_mask": spaces.Box(low=0, high=1, shape=(TOTAL_DISCRETE_ACTIONS,), dtype=bool),
-                }
-            )
+        self.actions_in_current_round: int = 0
+        self.current_s_t: torch.Tensor | None = None
+        self.current_s_hat_next: torch.Tensor | None = None
+        self.current_h_board: torch.Tensor | None = None
 
-    def _get_obs(self) -> dict[str, np.ndarray] | np.ndarray:
+    def update_reward_weights(self, progress_fraction: float, min_alpha: float = 0.0, min_beta: float = 0.05) -> None:
+        """Decay auxiliary representation weights (alpha and beta) linearly down to minimum floor.
+
+        progress_fraction: 0.0 at the beginning of training, 1.0 at max_generations.
+        """
+        progress = max(0.0, min(1.0, float(progress_fraction)))
+        self.current_alpha = max(min_alpha, self.initial_alpha * (1.0 - progress))
+        self.current_beta = max(min_beta, self.initial_beta * (1.0 - progress))
+        self.alpha = self.current_alpha
+        self.beta = self.current_beta
+
+    def set_target_z(self, z_k: np.ndarray | None, alpha: float = 0.8, beta: float = 0.2, z_index: int | None = None) -> None:
+        """Assign specialist target archetype Z-Index centroid."""
+        self.target_z = z_k
+        self.current_target_z_index = z_index
+        self.initial_alpha = alpha
+        self.initial_beta = beta
+        self.current_alpha = alpha
+        self.current_beta = beta
+        self.alpha = alpha
+        self.beta = beta
+
+    def _sample_new_target_z(self) -> None:
+        """Sample a new target composition centroid or unforced flex (z=0) with 50/50 probability."""
+        if self.z_centroids is not None and len(self.z_centroids) > 0:
+            # 50% of games: Train on forcing a specific High-Elo composition (z_k)
+            # 50% of games: Train on unforced flexible adaptation (z=None, alpha=0.0)
+            if np.random.random() < 0.5:
+                k = int(np.random.randint(0, len(self.z_centroids)))
+                self.target_z = self.z_centroids[k]
+                self.current_target_z_index = k
+                self.current_alpha = self.alpha
+            else:
+                self.target_z = None
+                self.current_target_z_index = None
+                self.current_alpha = 0.0
+
+    def _get_obs_and_masks(self) -> tuple[np.ndarray, np.ndarray]:
         focal = self.game.get_focal_player()
-        opponents = self.game.get_opponents(focal.player_id)
-        if self.use_flat_obs:
-            return self.encoder.encode_flat(focal, opponents, self.game.pool, self.game.stage_manager)
-        return self.encoder.encode_dict(focal, opponents, self.game.pool, self.game.stage_manager)
+        stage = self.game.stage_manager.stage
+        round_in_stage = self.game.stage_manager.round_in_stage
 
-    def _get_info(self) -> dict[str, Any]:
-        focal = self.game.get_focal_player()
+        obs_vec, s_t, h_board = self.encoder.extract_state_vector(
+            player=focal,
+            stage=stage,
+            round_in_stage=round_in_stage,
+            target_z=self.target_z,
+        )
+        self.current_s_t = s_t
+        self.current_h_board = h_board
+
+        # Project strategic oracle ŝ_{t+1} via world model
+        if self.world_model is not None and self.current_s_hat_next is None:
+            with torch.no_grad():
+                self.current_s_hat_next = self.world_model(s_t.unsqueeze(0)).squeeze(0)
+
         mask = get_action_mask(focal, self.set_data)
+        return obs_vec, mask
+
+    def _get_info(self, mask: np.ndarray) -> dict[str, Any]:
+        focal = self.game.get_focal_player()
         rinfo = self.game.stage_manager.get_current_round_info()
         return {
             "action_mask": mask,
@@ -100,6 +376,7 @@ class TFTEnv(gym.Env):
             "placement": focal.placement,
             "alive": focal.alive,
             "is_over": self.game.is_over,
+            "target_z_index": self.current_target_z_index,
         }
 
     def reset(
@@ -107,167 +384,169 @@ class TFTEnv(gym.Env):
         *,
         seed: int | None = None,
         options: dict[str, Any] | None = None,
-    ) -> tuple[dict[str, np.ndarray] | np.ndarray, dict[str, Any]]:
-        """Reset the environment to the beginning of a fresh TFT match."""
+    ) -> tuple[np.ndarray, dict[str, Any]]:
         super().reset(seed=seed)
         self.game.reset(seed=seed)
         self.actions_in_current_round = 0
-        self.last_health = self.game.get_focal_player().health
+        self.current_s_hat_next = None
 
-        obs = self._get_obs()
-        info = self._get_info()
+        if options and "target_z" in options:
+            self.target_z = options["target_z"]
+            self.current_target_z_index = options.get("target_z_index")
+        elif self.sample_random_z:
+            self._sample_new_target_z()
 
-        if self.render_mode in ("human", "ansi", "text"):
-            self.render()
-
+        obs, mask = self._get_obs_and_masks()
+        info = self._get_info(mask)
         return obs, info
 
-    def step(
-        self,
-        action: int,
-    ) -> tuple[dict[str, np.ndarray] | np.ndarray, float, bool, bool, dict[str, Any]]:
-        """Perform a discrete micro-action or advance the round on PASS (0)."""
+    def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         focal = self.game.get_focal_player()
-
-        if not focal.alive or self.game.is_over:
-            obs = self._get_obs()
-            info = self._get_info()
-            return obs, 0.0, True, False, info
-
+        terminated = False
+        truncated = False
         reward = 0.0
-        self.actions_in_current_round += 1
 
-        # Check if action is PASS (0) or exceeded action limit
-        if action == 0 or self.actions_in_current_round >= self.max_actions_per_round:
-            # 1. Opponent AI planning phase
-            self.game.execute_bot_turns()
+        is_pass = (action == 0) or (self.actions_in_current_round >= self.max_actions_per_round)
 
-            # 2. Resolve round combat & advance
-            health_before = focal.health
-            combat_results = self.game.resolve_round_phase()
-            health_after = focal.health
-            delta_hp = health_after - health_before
+        if not is_pass:
+            # 1. Sequential Decision Execution
+            gold_before = focal.gold
+            board_count_before = focal.board_unit_count
+            stars_before = sum(u.star_level for u in focal.board.values()) + sum(u.star_level for u in focal.bench if u is not None)
+            traits_before = sum(focal.get_active_traits().values())
+
+            success = execute_action(focal, self.game.pool, self.set_data, action)
+            self.actions_in_current_round += 1
+
+            if success:
+                # Fast CPU step reward shaping (runtime < 2 microseconds):
+                # A. Economy interest threshold delta
+                interest_prev = min(5, gold_before // 10)
+                interest_next = min(5, focal.gold // 10)
+                r_interest_step = float(interest_next - interest_prev) * 0.05
+
+                # B. Star-up upgrades (completing 2-star or 3-star champions)
+                stars_after = sum(u.star_level for u in focal.board.values()) + sum(u.star_level for u in focal.bench if u is not None)
+                delta_stars = max(0, stars_after - stars_before)
+                r_stars_step = float(delta_stars) * 0.15
+
+                # C. Synergies and trait tier activation
+                traits_after = sum(focal.get_active_traits().values())
+                delta_traits = max(0, traits_after - traits_before)
+                r_traits_step = float(delta_traits) * 0.05
+
+                # D. Board capacity deployment (filling vacant board slots)
+                board_count_after = focal.board_unit_count
+                delta_deployed = max(0, board_count_after - board_count_before)
+                r_deploy_step = float(delta_deployed) * 0.05
+
+                # Total shaped step reward
+                reward = r_interest_step + r_stars_step + r_traits_step + r_deploy_step
+                r_step_env = r_interest_step
+            else:
+                # Small penalty for invalid or no-op action
+                reward = -0.02
+                r_interest_step = 0.0
+                r_stars_step = 0.0
+                r_traits_step = 0.0
+                r_step_env = -0.02
+
+            reward_breakdown = {
+                "r_env": r_step_env,
+                "r_combat": 0.0,
+                "r_interest": r_interest_step,
+                "r_terminal": 0.0,
+                "r_macro": r_traits_step,
+                "r_micro": r_stars_step,
+                "alpha": self.current_alpha,
+                "beta": self.current_beta,
+            }
+        else:
+            # 2. Planning phase finalized -> Combat Resolution
+            hp_before = focal.health
+            round_res = self.game.step_round()
+            hp_after = focal.health
+            delta_hp = max(0, hp_before - hp_after)
+            won_combat = (delta_hp == 0 and focal.alive)
+
+            # R_combat
+            if won_combat:
+                r_combat = 0.5
+            else:
+                r_combat = -0.02 * delta_hp
+
+            # R_interest
+            r_interest = 0.05 if focal.gold >= 50 else 0.0
+
+            # R_terminal
+            r_terminal = 0.0
+            if not focal.alive or self.game.is_over:
+                terminated = True
+                placement = focal.placement or 8
+                if placement == 1:
+                    r_terminal = 2.0
+                elif 2 <= placement <= 4:
+                    r_terminal = 1.0
+                elif 5 <= placement <= 6:
+                    r_terminal = -1.0
+                else:
+                    r_terminal = -2.0
+
+            r_env = r_combat + r_interest + r_terminal
+
+            # 3. Macro Alignment (R_macro) & Micro Alignment (R_micro) at round boundary
+            stage = self.game.stage_manager.stage
+            round_in_stage = self.game.stage_manager.round_in_stage
+            _, s_next, h_board_next = self.encoder.extract_state_vector(
+                player=focal,
+                stage=stage,
+                round_in_stage=round_in_stage,
+                target_z=self.target_z,
+            )
+
+            r_micro = 0.0
+            if self.current_s_hat_next is not None:
+                r_micro = float(
+                    F.cosine_similarity(s_next.unsqueeze(0), self.current_s_hat_next.unsqueeze(0)).item()
+                )
+
+            r_macro = 0.0
+            cluster_match = None
+            if self.target_z is not None:
+                z_target_tensor = torch.as_tensor(self.target_z, dtype=torch.float32, device=self.device)
+                if z_target_tensor.norm() > 1e-6:
+                    r_macro = float(
+                        F.cosine_similarity(h_board_next.unsqueeze(0), z_target_tensor.unsqueeze(0)).item()
+                    )
+                if self.z_centroids is not None and self.current_target_z_index is not None and len(self.z_centroids) > 0:
+                    z_cents = torch.as_tensor(self.z_centroids, dtype=torch.float32, device=self.device)
+                    sims = F.cosine_similarity(h_board_next.unsqueeze(0), z_cents, dim=-1)
+                    best_k = int(torch.argmax(sims).item())
+                    cluster_match = 1.0 if best_k == self.current_target_z_index else 0.0
 
             # Round outcome reward
-            if delta_hp < 0:
-                reward += (delta_hp / 100.0) * 0.5  # Negative reward for damage taken
-            elif self.game.stage_manager.get_current_round_info().is_pvp:
-                reward += 0.1  # Positive reward for winning PvP round
+            reward = r_env + (self.current_alpha * r_macro) + (self.current_beta * r_micro)
+            reward_breakdown = {
+                "r_env": r_env,
+                "r_combat": r_combat,
+                "r_interest": r_interest,
+                "r_terminal": r_terminal,
+                "r_macro": r_macro,
+                "r_micro": r_micro,
+                "cluster_match": cluster_match,
+                "alpha": self.current_alpha,
+                "beta": self.current_beta,
+            }
 
-            # Small survival step reward
-            if focal.alive:
-                reward += 0.02
-
-            # Tournament placement reward on game end / elimination
-            if not focal.alive or self.game.is_over:
-                placement = focal.placement or (1 if focal.alive else 8)
-                # Map 1st -> +1.0, 2nd -> +0.6, 3rd -> +0.4, 4th -> +0.2, 5th -> -0.2, 6th -> -0.4, 7th -> -0.6, 8th -> -1.0
-                placement_rewards = {
-                    1: 1.0,
-                    2: 0.6,
-                    3: 0.4,
-                    4: 0.2,
-                    5: -0.2,
-                    6: -0.4,
-                    7: -0.6,
-                    8: -1.0,
-                }
-                reward += placement_rewards.get(placement, 0.0)
-
+            # Reset planning counter for next round
             self.actions_in_current_round = 0
-        else:
-            # Execute micro-action (buy, sell, move, equip, roll, level)
-            valid = self.game.step_player_action(focal.player_id, action)
-            if not valid:
-                reward -= 0.01  # Minor penalty for invalid action attempt
+            self.current_s_hat_next = None
 
-        terminated = not focal.alive or self.game.is_over
-        truncated = False
-        obs = self._get_obs()
-        info = self._get_info()
-
-        if self.render_mode in ("human", "ansi", "text"):
-            self.render()
+        obs, mask = self._get_obs_and_masks()
+        info = self._get_info(mask)
+        info["step_reward"] = reward
+        info["reward_breakdown"] = reward_breakdown
 
         return obs, reward, terminated, truncated, info
 
-    def render(self) -> str | None:
-        """Render ASCII representation of current game state."""
-        focal = self.game.get_focal_player()
-        rinfo = self.game.stage_manager.get_current_round_info()
 
-        lines: list[str] = []
-        lines.append("=" * 70)
-        lines.append(
-            f" [TFT SIMULATION] | Stage: {rinfo.stage_str} ({rinfo.round_type.value}) | Round: {self.game.stage_manager.total_rounds_elapsed}"
-        )
-        lines.append("=" * 70)
-        lines.append(
-            f" HP: {focal.health}/100 | Gold: {focal.gold}g | Level: {focal.level} (XP: {focal.exp}/{self.set_data.level_exp.get(focal.level, 'MAX')}) | Streak: {focal.streak:+d}"
-        )
-        lines.append("-" * 70)
-
-        # Board Grid
-        lines.append(" FIELDED BOARD (4x7 Grid):")
-        for r in range(self.set_data.board_rows):
-            row_str = f"  Row {r}: "
-            hex_cells: list[str] = []
-            for c in range(self.set_data.board_cols):
-                unit = focal.board.get((r, c))
-                if unit:
-                    star_str = "*" * unit.star_level
-                    c_short = unit.champion_id.replace("TFT17_", "")[:7]
-                    item_count = len(unit.items)
-                    hex_cells.append(f"[{c_short} {star_str}|{item_count}i]")
-                else:
-                    hex_cells.append("[   .   ]")
-            lines.append(row_str + " ".join(hex_cells))
-
-        # Bench
-        lines.append("-" * 70)
-        bench_cells: list[str] = []
-        for idx, slot in enumerate(focal.bench):
-            if slot:
-                star_str = "*" * slot.star_level
-                c_short = slot.champion_id.replace("TFT17_", "")[:6]
-                bench_cells.append(f"({idx}:{c_short} {star_str})")
-            else:
-                bench_cells.append(f"({idx}: - )")
-        lines.append(" BENCH: " + " ".join(bench_cells))
-
-        # Items
-        item_names = [it.name for it in focal.item_bench]
-        lines.append(f" ITEM BENCH ({len(focal.item_bench)}/10): {', '.join(item_names) if item_names else 'Empty'}")
-
-        # Shop
-        shop_cards: list[str] = []
-        for idx, card in enumerate(focal.shop.slots):
-            if card:
-                cdef = self.set_data.champions.get(card)
-                cost = cdef.cost if cdef else 1
-                c_short = card.replace("TFT17_", "")
-                shop_cards.append(f"[{idx}] {c_short} ({cost}g)")
-            else:
-                shop_cards.append(f"[{idx}] (Bought)")
-        lock_str = "LOCKED" if focal.shop.locked else "Unlocked"
-        lines.append(f" SHOP ({lock_str}): " + " | ".join(shop_cards))
-
-        # Active Traits
-        active_traits = focal.get_active_traits()
-        active_str = ", ".join(f"{t}: Tier {tier}" for t, tier in active_traits.items() if tier > 0)
-        lines.append(f" ACTIVE TRAITS: {active_str if active_str else 'None'}")
-
-        # Opponents Standings
-        lines.append("-" * 70)
-        lines.append(" LOBBY STANDINGS:")
-        for p in self.game.players:
-            status = f"Dead (#{p.placement})" if not p.alive else f"HP: {p.health} | Lv:{p.level} | {p.gold}g | Board: {len(p.board)}u"
-            is_focal_marker = "-> " if p.player_id == focal.player_id else "   "
-            lines.append(f"  {is_focal_marker}Player {p.player_id}: {status}")
-
-        lines.append("=" * 70)
-
-        output = "\n".join(lines)
-        if self.render_mode == "human":
-            print(output)
-        return output

@@ -1,0 +1,384 @@
+{
+  "timestamp": "2026-09-06T23:26:01Z",
+  "elapsed_seconds": 6.51,
+  "device": "cuda",
+  "reports": {
+    "trunk": {
+      "model_name": "MultiModalFusionTrunk",
+      "checkpoint_path": "models/trunk/trunk_best.pt",
+      "overall_status": "PASS",
+      "empirical_metrics": {
+        "champ_embed_norm": 126.55,
+        "star_embed_norm": 5.44,
+        "item_embed_norm": 96.6,
+        "item_embed_std": 0.9843,
+        "fused_dim": 384
+      },
+      "test_results": [
+        {
+          "name": "Champion Distinction Law",
+          "description": "Different champions must have separated embedding vectors in Champ2Vec",
+          "law": "cos_sim(champ_i, champ_j) < 0.85",
+          "expected": "< 0.850",
+          "actual": "-0.0318",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "Star Progression Monotonicity",
+          "description": "Upgrades must progress along the star embedding manifold",
+          "law": "dist(1*, 2*) < dist(1*, 3*)",
+          "expected": "d(1,2) < d(1,3) (actual: 1.27 vs 2.39)",
+          "actual": "1.27 < 2.39",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "Item Vector Divergence Law",
+          "description": "A board with 9 completed items must cause significant vector separation from 0 items",
+          "law": "cos_sim(h_no_items, h_full_items) < 0.90",
+          "expected": "< 0.900",
+          "actual": "cos_sim = 0.8279 (dist = 3.70)",
+          "passed": true,
+          "status": "PASS",
+          "details": {
+            "h_sim": 0.8279495239257812,
+            "s_sim": 0.7260216474533081,
+            "h_dist": 3.7038495540618896
+          }
+        }
+      ],
+      "diagnosis": "",
+      "summary": ""
+    },
+    "combat_resolver": {
+      "model_name": "DeepSiameseCombatNet",
+      "checkpoint_path": "models\\round_winner\\deep_siamese_combat_best.pt",
+      "overall_status": "PASS",
+      "empirical_metrics": {
+        "replay_samples_evaluated": 90,
+        "mean_win_probability_vs_human_boards": "80.17%",
+        "std_win_probability": "14.90%"
+      },
+      "test_results": [
+        {
+          "name": "Mirror Match Identity Law",
+          "description": "P(Board A beats Board A) must strictly evaluate to 50.0%",
+          "law": "|P(A vs A) - 50.0%| <= 2.0%",
+          "expected": "50.00% +/- 2.0%",
+          "actual": "50.00%",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "Anti-Symmetry Law",
+          "description": "Combat resolver must be mathematically anti-symmetric across focal/opponent swap",
+          "law": "P(A vs B) + P(B vs A) == 100.0%",
+          "expected": "100.00% +/- 1.0%",
+          "actual": "100.00% (7.2% + 92.8%)",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "Unit Count Dominance Law",
+          "description": "9 units (2-star) must overwhelmingly crush 3 units (1-star)",
+          "law": "P(9 Units vs 3 Units) >= 95.0%",
+          "expected": ">= 95.00%",
+          "actual": "99.87%",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "Star Level Dominance Law",
+          "description": "Full 3-star composition must consistently defeat an identical 1-star composition",
+          "law": "P(3-Star vs 1-Star) >= 90.0%",
+          "expected": ">= 90.00%",
+          "actual": "96.30%",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "Item Advantage Law",
+          "description": "An identical composition equipped with 9 completed meta items must overwhelmingly defeat 0 items",
+          "law": "P(9 Items vs 0 Items) >= 80.0%",
+          "expected": ">= 80.00%",
+          "actual": "92.83%",
+          "passed": true,
+          "status": "PASS",
+          "details": {
+            "heuristic_comparison": "HeuristicCombatResolver yields 368.3 power vs 136.1 power (x2.71 multiplier)"
+          }
+        },
+        {
+          "name": "Champion Cost Dominance Law",
+          "description": "Full 4-cost / 5-cost composition must overpower a 1-cost composition of equal stars",
+          "law": "P(High Cost vs Low Cost) >= 75.0%",
+          "expected": ">= 75.00%",
+          "actual": "75.31%",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        }
+      ],
+      "diagnosis": "All combat sanity laws passed.",
+      "summary": ""
+    },
+    "board_quality": {
+      "model_name": "BoardQualityNet",
+      "checkpoint_path": "models\\board_evaluator\\board_quality_best.pt",
+      "overall_status": "PASS",
+      "empirical_metrics": {},
+      "test_results": [
+        {
+          "name": "Endgame Composition Separation Law",
+          "description": "A capped Stage 5 Level 9 board must predict a substantially superior finish than an early weak board",
+          "law": "E[Place_weak] - E[Place_capped] >= 2.0 places",
+          "expected": ">= +2.00 places difference",
+          "actual": "+2.37 places (Capped: 1.74, Weak: 4.11)",
+          "passed": true,
+          "status": "PASS",
+          "details": {
+            "top4_capped": "99.2%",
+            "top4_weak": "46.1%"
+          }
+        },
+        {
+          "name": "Star Upgrade Placement Benefit Law",
+          "description": "Upgrading an entire board from 1-star to 3-star must meaningfully improve placement",
+          "law": "E[Place_1star] - E[Place_3star] >= 0.50 places",
+          "expected": ">= +0.50 places improvement",
+          "actual": "+0.86 places (1*: 3.87 -> 3*: 3.01)",
+          "passed": true,
+          "status": "PASS",
+          "details": {
+            "top4_1s": "66.6%",
+            "top4_3s": "79.8%"
+          }
+        },
+        {
+          "name": "Itemization Placement Benefit Law",
+          "description": "Equipping 9 completed meta items on carries/tanks must improve expected placement",
+          "law": "E[Place_naked] - E[Place_items] >= 0.40 places",
+          "expected": ">= +0.40 places improvement",
+          "actual": "+0.52 places (Naked: 3.25 -> Full: 2.72)",
+          "passed": true,
+          "status": "PASS",
+          "details": {
+            "top4_naked": "72.0%",
+            "top4_items": "89.9%"
+          }
+        },
+        {
+          "name": "Health Buffer Survival Law",
+          "description": "At identical boards, a player with 100 HP must have a strictly higher Top-4 probability than a player at 12 HP",
+          "law": "P(Top-4 | 100 HP) - P(Top-4 | 12 HP) >= 10.0%",
+          "expected": ">= +10.00% higher survival",
+          "actual": "+64.5% points (100 HP: 99.1%, 12 HP: 34.6%)",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        }
+      ],
+      "diagnosis": "",
+      "summary": ""
+    },
+    "world_model": {
+      "model_name": "StateTransitionPredictor (World Model)",
+      "checkpoint_path": "models\\transition_predictor\\predictor_best.pt",
+      "overall_status": "PASS",
+      "empirical_metrics": {},
+      "test_results": [
+        {
+          "name": "Non-Identity Dynamics Law",
+          "description": "World Model must predict non-zero transition dynamics (must not output identity copy of input)",
+          "law": "cos_sim(s_t, s_hat_{t+1}) < 0.9995",
+          "expected": "< 0.9995 (genuine transition)",
+          "actual": "0.93567",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "Autoregressive Rollout Stability Law",
+          "description": "Multi-step recursive lookahead must not explode towards infinity or collapse to zero",
+          "law": "0.50 <= ||s_{t+5}|| / ||s_t|| <= 2.00",
+          "expected": "[0.50, 2.00]",
+          "actual": "0.987x norm ratio",
+          "passed": true,
+          "status": "PASS",
+          "details": {
+            "1_step_ratio": "0.995x",
+            "5_step_ratio": "0.987x"
+          }
+        },
+        {
+          "name": "Residual Transition Magnitude Law",
+          "description": "Predicted change delta must have measurable non-zero Euclidean magnitude",
+          "law": "||s_hat_{t+1} - s_t|| > 0.01",
+          "expected": "> 0.010",
+          "actual": "3.4793",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        }
+      ],
+      "diagnosis": "",
+      "summary": ""
+    },
+    "z_index": {
+      "model_name": "Z-Index Macro Composition Centroids",
+      "checkpoint_path": "models\\clustering\\z_index.pt",
+      "overall_status": "PASS",
+      "empirical_metrics": {
+        "cluster_count_k": 8,
+        "latent_feature_dim": 256,
+        "mean_centroid_norm": "0.533"
+      },
+      "test_results": [
+        {
+          "name": "Archetype Orthogonality Law",
+          "description": "Target archetypes must represent distinctly separated strategic comps",
+          "law": "max_{i != j} cos_sim(z_i, z_j) < 0.85",
+          "expected": "< 0.850",
+          "actual": "0.3885 (mean sim = -0.1353)",
+          "passed": true,
+          "status": "PASS",
+          "details": {
+            "min_cosine_distance": "0.6115"
+          }
+        },
+        {
+          "name": "Centroid Non-Degeneracy Law",
+          "description": "All k cluster centroids must possess non-trivial vector magnitude",
+          "law": "min_k ||z_k|| > 0.10",
+          "expected": "> 0.100",
+          "actual": "0.4684",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "Semantic Composition Alignment Law",
+          "description": "Canonical tournament compositions must project positively into the latent archetype subspace",
+          "law": "max_k cos_sim(h_{comp}, z_k) > 0.15",
+          "expected": "> 0.150 for meta comps",
+          "actual": "Comp A max sim = 0.3469, Comp B max sim = 0.4592",
+          "passed": true,
+          "status": "PASS",
+          "details": {
+            "comp_a_best_cluster": 2,
+            "comp_b_best_cluster": 3
+          }
+        }
+      ],
+      "diagnosis": "",
+      "summary": ""
+    },
+    "elo_regressor": {
+      "model_name": "EloRegressor (Skill Rating Predictor)",
+      "checkpoint_path": "models\\elo_predictor\\elo_regressor_player_level.pkl",
+      "overall_status": "PASS",
+      "empirical_metrics": {},
+      "test_results": [
+        {
+          "name": "Model Object & Inference Interface",
+          "description": "MatchEloRegressor deserializes cleanly and exposes competitive predict_match interface",
+          "law": "hasattr(model, 'predict_match')",
+          "expected": "True",
+          "actual": "hasattr = True",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "Competitive Tempo Monotonicity Law",
+          "description": "Aggressive Challenger tempo must predict strictly higher rating than passive low-tier play",
+          "law": "Elo(Challenger Tempo) - Elo(Iron Tempo) >= +800",
+          "expected": ">= +800 ELO separation",
+          "actual": "Delta = +1501 ELO (Challenger: 2895 [MASTER] vs Iron: 1394 [GOLD])",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "Solution Space OOD Detection Law",
+          "description": "Valid human gameplay must be flagged in-distribution, aberrant bot trajectories flagged as outliers",
+          "law": "Human == Inlier and Aberrant Bot == Outlier",
+          "expected": "Human inlier and Bot outlier",
+          "actual": "Human inlier=True (98.8%), Bot outlier=True (Dist=32.5)",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "Competitive Elo Range Boundedness Law",
+          "description": "Predicted Elo ratings must remain within realistic ranked ladder bounds [100, 4600]",
+          "law": "100.0 <= Elo <= 4600.0",
+          "expected": "[100, 4600]",
+          "actual": "Challenger: 2895, Iron: 1394",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        }
+      ],
+      "diagnosis": "All Elo regressor sanity laws passed.",
+      "summary": ""
+    },
+    "actor_critic": {
+      "model_name": "TFTActorCritic (AlphaStar ppo_alphastar_v7 gen_0030)",
+      "checkpoint_path": "D:\\tft-winner-data\\set18\\models\\rl\\checkpoints\\ppo_alphastar_v7\\gen_0030\\training_state.pt",
+      "overall_status": "FAIL",
+      "empirical_metrics": {},
+      "test_results": [
+        {
+          "name": "Action Mask Enforcement Law",
+          "description": "Illegal masked actions must receive mathematically zero probability mass",
+          "law": "sum_{a in masked} P(a) == 0.0000",
+          "expected": "0.000000",
+          "actual": "0.00000000",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "Health Monotonicity Value Law",
+          "description": "Higher health buffer must reflect higher expected cumulative return V(s)",
+          "law": "V(s | 100 HP) > V(s | 12 HP)",
+          "expected": "V(100 HP) > V(12 HP)",
+          "actual": "Delta = +4.5324 (100 HP: +6.818 vs 12 HP: +2.286)",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "Board Size Value Monotonicity Law",
+          "description": "A 9-unit full board must evaluate to a strictly higher expected return than a 3-unit board",
+          "law": "V(s | 9 Units) > V(s | 3 Units)",
+          "expected": "V(9 Units) > V(3 Units)",
+          "actual": "Delta = +1.4714 (9 Units: +8.197 vs 3 Units: +6.725)",
+          "passed": true,
+          "status": "PASS",
+          "details": {}
+        },
+        {
+          "name": "Critic Item Sensitivity Law",
+          "description": "The critic value function V(s) must appreciate the massive combat value of 9 completed items",
+          "law": "V(s | 9 Items) - V(s | 0 Items) > +0.10",
+          "expected": ">= +0.100 higher value",
+          "actual": "-2.2178 (Naked: +8.139 -> Items: +5.922)",
+          "passed": false,
+          "status": "FAIL",
+          "details": {}
+        }
+      ],
+      "diagnosis": "TFTActorCritic fails the following laws: Critic Item Sensitivity Law.",
+      "summary": ""
+    }
+  }
+}

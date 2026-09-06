@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 import pandas as pd
@@ -189,30 +190,60 @@ class MLCombatResolver:
 
         r = rng or random
 
-        # Construct input DataFrame matching feature extractor format
-        row_dict = {
-            "round_stage": stage_str,
-            "focal_level": player_a.level,
-            "focal_health": player_a.health,
-            "focal_gold": player_a.gold,
-            "focal_augments": "",
-            "opponent_level": player_b.level,
-            "opponent_health": player_b.health,
-            "opponent_augments": "",
-            "input_state_json": {
-                "focal_board": player_a.to_feature_board(),
-                "opponent_board": player_b.to_feature_board(),
-            },
-        }
+        try:
+            if isinstance(self.model_pipeline, (str, Path)):
+                from tft_ai_player.round_winner.trainer import RoundWinnerPredictor
+                self.model_pipeline = RoundWinnerPredictor.load(self.model_pipeline)
+        except (Exception, BaseException):
+            return self.fallback.resolve(
+                player_a,
+                player_b,
+                is_ghost_b,
+                stage,
+                stage_str,
+                set_data,
+                rng=rng,
+            )
+
+        predicted_damage_loss: int | None = None
 
         try:
-            df = pd.DataFrame([row_dict])
-            probs = self.model_pipeline.predict_proba(df)
-            # Class 1 probability (focal player win)
-            win_prob_a = float(probs[0, 1])
-            win_prob_a = max(0.01, min(0.99, win_prob_a))
-        except Exception:
-            # Fallback to heuristic on unexpected feature error
+            from tft_ai_player.round_winner.trainer import RoundWinnerPredictor
+            if isinstance(self.model_pipeline, RoundWinnerPredictor):
+                win_prob_a, dmg_a_loss, dmg_b_loss = self.model_pipeline.predict_combat(
+                    player_a.to_feature_board(),
+                    player_b.to_feature_board(),
+                    round_stage=stage_str,
+                    focal_level=player_a.level,
+                    opponent_level=player_b.level,
+                    focal_health=player_a.health,
+                    opponent_health=player_b.health,
+                    focal_gold=player_a.gold,
+                    opponent_gold=player_b.gold,
+                )
+            else:
+                row_dict = {
+                    "round_stage": stage_str,
+                    "focal_level": player_a.level,
+                    "focal_health": player_a.health,
+                    "focal_gold": player_a.gold,
+                    "focal_augments": "",
+                    "opponent_level": player_b.level,
+                    "opponent_health": player_b.health,
+                    "opponent_augments": "",
+                    "input_state_json": {
+                        "focal_board": player_a.to_feature_board(),
+                        "opponent_board": player_b.to_feature_board(),
+                    },
+                }
+                df = pd.DataFrame([row_dict])
+                probs = self.model_pipeline.predict_proba(df)
+                win_prob_a = float(probs[0, 1])
+                dmg_a_loss = None
+                dmg_b_loss = None
+            win_prob_a = max(0.01, min(0.99, float(win_prob_a)))
+        except (Exception, BaseException):
+            # Fallback to heuristic on unexpected feature error or missing DLL
             return self.fallback.resolve(
                 player_a,
                 player_b,
@@ -235,6 +266,130 @@ class MLCombatResolver:
             loser_id = player_b.player_id
             winner_board_len = len(player_a.board) or 1
             surviving = min(winner_board_len, max(1, int(round(win_prob_a * winner_board_len * 0.7))))
+            if dmg_b_loss is not None:
+                damage = dmg_b_loss
+            else:
+                damage = base_damage + surviving
+        else:
+            winner_id = player_b.player_id
+            loser_id = player_a.player_id
+            winner_board_len = len(player_b.board) or 1
+            surviving = min(winner_board_len, max(1, int(round((1.0 - win_prob_a) * winner_board_len * 0.7))))
+            if dmg_a_loss is not None:
+                damage = dmg_a_loss
+            else:
+                damage = base_damage + surviving
+
+        return CombatResult(
+            winner_id=winner_id,
+            loser_id=loser_id,
+            damage_dealt=damage,
+            win_prob_a=win_prob_a,
+            surviving_units=surviving,
+            is_ghost_b=is_ghost_b,
+        )
+
+
+class DLCombatResolver:
+    """Surrogate combat resolver utilizing the pre-trained neural Trunk combat head."""
+
+    def __init__(
+        self,
+        model: Any,
+        encoder: Any | None = None,
+        stochastic: bool = True,
+        device: Any | None = None,
+    ) -> None:
+        import torch
+        self.model = model
+        self.encoder = encoder
+        self.stochastic = stochastic
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.fallback = HeuristicCombatResolver(stochastic=stochastic)
+
+    def resolve(
+        self,
+        player_a: Player,
+        player_b: Player,
+        is_ghost_b: bool,
+        stage: int,
+        stage_str: str,
+        set_data: SetData,
+        rng: random.Random | None = None,
+    ) -> CombatResult:
+        """Resolve combat using Deep Learning board embeddings and combat head."""
+        import torch
+
+        if not player_a.board or not player_b.board:
+            return self.fallback.resolve(
+                player_a, player_b, is_ghost_b, stage, stage_str, set_data, rng=rng
+            )
+
+        r = rng or random
+
+        try:
+            if self.encoder is None:
+                from tft_ai_player.simulation.gym_env import TFTStateEncoder
+                trunk_obj = getattr(self.model, "trunk", self.model)
+                self.encoder = TFTStateEncoder(trunk=trunk_obj, set_data=set_data, device=self.device)
+
+            ca, sa, ia, ta = self.encoder.encode_board_tensors(player_a)
+            cb, sb, ib, tb = self.encoder.encode_board_tensors(player_b)
+            sca = self.encoder.encode_scalars(player_a, stage=stage, round_in_stage=1)
+            scb = self.encoder.encode_scalars(player_b, stage=stage, round_in_stage=1)
+
+            if hasattr(self.model, "interaction_mlp"):
+                f_batch = {
+                    "board_champ_ids": ca.unsqueeze(0).to(self.device),
+                    "board_star_levels": sa.unsqueeze(0).to(self.device),
+                    "board_item_ids": ia.unsqueeze(0).to(self.device),
+                    "board_traits": ta.unsqueeze(0).to(self.device),
+                    "state_scalars": sca.unsqueeze(0).to(self.device),
+                }
+                o_batch = {
+                    "board_champ_ids": cb.unsqueeze(0).to(self.device),
+                    "board_star_levels": sb.unsqueeze(0).to(self.device),
+                    "board_item_ids": ib.unsqueeze(0).to(self.device),
+                    "board_traits": tb.unsqueeze(0).to(self.device),
+                    "state_scalars": scb.unsqueeze(0).to(self.device),
+                }
+                with torch.no_grad():
+                    logit = self.model(f_batch, o_batch)
+                    win_prob_a = float(torch.sigmoid(logit).item())
+            else:
+                c_batch = torch.stack([ca, cb]).to(self.device)
+                s_batch = torch.stack([sa, sb]).to(self.device)
+                i_batch = torch.stack([ia, ib]).to(self.device)
+                t_batch = torch.stack([ta, tb]).to(self.device)
+                sc_batch = torch.stack([sca, scb]).to(self.device)
+
+                with torch.no_grad():
+                    fused, _, combat_logits, _ = self.model.forward_snapshot(
+                        board_champ_ids=c_batch,
+                        board_star_levels=s_batch,
+                        board_item_ids=i_batch,
+                        board_traits=t_batch,
+                        state_scalars=sc_batch,
+                    )
+                    diff = (combat_logits[0] - combat_logits[1]).item()
+                    win_prob_a = float(torch.sigmoid(torch.tensor(diff)).item())
+            win_prob_a = max(0.01, min(0.99, win_prob_a))
+        except Exception:
+            return self.fallback.resolve(
+                player_a, player_b, is_ghost_b, stage, stage_str, set_data, rng=rng
+            )
+
+        if self.stochastic:
+            a_won = r.random() < win_prob_a
+        else:
+            a_won = win_prob_a >= 0.5
+
+        base_damage = set_data.stage_base_damage.get(stage, set_data.stage_base_damage.get(7, 17))
+        if a_won:
+            winner_id = player_a.player_id
+            loser_id = player_b.player_id
+            winner_board_len = len(player_a.board) or 1
+            surviving = min(winner_board_len, max(1, int(round(win_prob_a * winner_board_len * 0.7))))
         else:
             winner_id = player_b.player_id
             loser_id = player_a.player_id
@@ -251,3 +406,4 @@ class MLCombatResolver:
             surviving_units=surviving,
             is_ghost_b=is_ghost_b,
         )
+

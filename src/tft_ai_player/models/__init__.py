@@ -1,5 +1,45 @@
-"""TFT AI Player Models Package (aliases to round_winner)."""
+"""Unified TFT AI Models Package Hub.
 
+Re-exports model architectures, feature extractors, and trainers across:
+- embeddings: Multi-Modal Fusion Trunk, Champ2Vec, TraitEncoder, BoardHexTransformer, StateMLP
+- round_winner: Combat Winner ML pipelines (LightGBM, XGBoost, CatBoost)
+- rl: Reinforcement Learning Actor-Critic policies
+"""
+
+from ..embeddings import (
+    BoardCNNEncoder,
+    BoardHexTransformer,
+    Champ2Vec,
+    ChampionVocabulary,
+    HexDistanceAttention,
+    HexTransformerBlock,
+    InfoNCELoss,
+    ItemVocabulary,
+    MultiModalFusionTrunk,
+    MultiTaskTrunkLoss,
+    PermutationInvariantChamp2Vec,
+    ResidualMLPBlock,
+    SnapshotPairCollate,
+    StateMLP,
+    StateTransitionLoss,
+    StateTransitionPredictor,
+    TFTAxialBoardEncoder,
+    TFTPretrainDataset,
+    TraitEncoder,
+    TraitVocabulary,
+    TransitionPredictorTrainer,
+    TransitionTrajectoryDataset,
+    TrunkPreTrainer,
+    TrunkPretrainModel,
+    build_hex_geodesic_distance_matrix,
+    create_synthetic_trajectory_dataset,
+    create_synthetic_transition_dataset,
+    extract_latent_transition_pairs,
+    is_pvp_round,
+    is_valid_pvp_transition,
+    parse_loc_to_row_col,
+    parse_stage_string,
+)
 from ..round_winner import (
     ALL_SET17_TRAITS,
     CHAMP_BASE_COSTS,
@@ -20,13 +60,43 @@ from ..round_winner import (
 )
 
 __all__ = [
-    "ALL_SET17_TRAITS",
-    "CHAMP_BASE_COSTS",
-    "SET17_TRAIT_CHAMPIONS",
-    "SET17_TRAIT_THRESHOLDS",
+    # Embeddings
+    "ChampionVocabulary",
+    "ItemVocabulary",
+    "TraitVocabulary",
+    "Champ2Vec",
+    "PermutationInvariantChamp2Vec",
+    "BoardHexTransformer",
+    "HexDistanceAttention",
+    "HexTransformerBlock",
+    "BoardCNNEncoder",
+    "TFTAxialBoardEncoder",
+    "build_hex_geodesic_distance_matrix",
+    "TraitEncoder",
+    "StateMLP",
+    "MultiModalFusionTrunk",
+    "TrunkPretrainModel",
+    "InfoNCELoss",
+    "MultiTaskTrunkLoss",
+    "TFTPretrainDataset",
+    "SnapshotPairCollate",
+    "TrunkPreTrainer",
+    "create_synthetic_trajectory_dataset",
+    "parse_loc_to_row_col",
+    "parse_stage_string",
+    "is_pvp_round",
+    "ResidualMLPBlock",
+    "StateTransitionPredictor",
+    "StateTransitionLoss",
+    "TransitionPredictorTrainer",
+    "TransitionTrajectoryDataset",
+    "create_synthetic_transition_dataset",
+    "extract_latent_transition_pairs",
+    "is_valid_pvp_transition",
+    # Round Winner
+    "TFTBoardFeatureExtractor",
     "RoundWinnerPredictor",
     "RoundWinnerTrainer",
-    "TFTBoardFeatureExtractor",
     "build_calibrated_pipeline",
     "build_catboost_pipeline",
     "build_lightgbm_pipeline",
@@ -36,4 +106,9 @@ __all__ = [
     "compute_calibration_table",
     "compute_classification_metrics",
     "evaluate_probabilistic_model",
+    "ALL_SET17_TRAITS",
+    "SET17_TRAIT_THRESHOLDS",
+    "SET17_TRAIT_CHAMPIONS",
+    "CHAMP_BASE_COSTS",
 ]
+

@@ -24,6 +24,10 @@ class ItemInstance:
     name: str
     is_component: bool = False
 
+    def clone(self) -> ItemInstance:
+        """Create an isolated clone of this item instance."""
+        return ItemInstance(item_id=self.item_id, name=self.name, is_component=self.is_component)
+
 
 @dataclass(slots=True)
 class ChampionInstance:
@@ -34,6 +38,16 @@ class ChampionInstance:
     star_level: int = 1
     items: list[str] = field(default_factory=list)
     position: tuple[int, int] | None = None  # (row 0..3, col 0..6) if on board
+
+    def clone(self) -> ChampionInstance:
+        """Create an isolated clone of this champion instance."""
+        return ChampionInstance(
+            champion_id=self.champion_id,
+            cost=self.cost,
+            star_level=self.star_level,
+            items=list(self.items),
+            position=self.position,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary matching dataset / feature extractor format."""
@@ -123,12 +137,28 @@ class ChampionPool:
                 self.return_champion(slot, star_level=1)
 
 
+    def clone(self) -> ChampionPool:
+        """Create an isolated clone of the champion pool state."""
+        cp = ChampionPool.__new__(ChampionPool)
+        cp.set_data = self.set_data
+        cp.counts = dict(self.counts)
+        cp.champions_by_cost = self.champions_by_cost
+        return cp
+
+
 class Shop:
     """Player shop offering 5 champion choices each round."""
 
     def __init__(self) -> None:
         self.slots: list[str | None] = [None, None, None, None, None]
         self.locked: bool = False
+
+    def clone(self) -> Shop:
+        """Create an isolated clone of the shop state."""
+        s = Shop()
+        s.slots = list(self.slots)
+        s.locked = self.locked
+        return s
 
     def refresh(
         self,
@@ -214,6 +244,36 @@ class Player:
         self.rengar_takedowns: int = 0
         self.ignited_shop_slots: list[int] = []
         self.combats_since_overrun: int = 0
+
+    def clone(self) -> Player:
+        """Create a high-performance isolated clone of this player state."""
+        p = Player(player_id=self.player_id, set_data=self.set_data, name=self.name)
+        p.health = self.health
+        p.gold = self.gold
+        p.level = self.level
+        p.exp = self.exp
+        p.streak = self.streak
+        p.alive = self.alive
+        p.placement = self.placement
+        p.board = {pos: unit.clone() for pos, unit in self.board.items()}
+        p.bench = [u.clone() if u is not None else None for u in self.bench]
+        p.item_bench = [it.clone() for it in self.item_bench]
+        p.shop = self.shop.clone()
+        p.last_opponents = list(self.last_opponents)
+        p.augments = list(self.augments)
+        p.duplicators = self.duplicators
+        p.reforgers = self.reforgers
+        p.removers = self.removers
+        p.extra_team_size = self.extra_team_size
+        p.max_interest_cap = self.max_interest_cap
+        p.free_rerolls = self.free_rerolls
+        p.coven_essence = self.coven_essence
+        p.fae_pixies = self.fae_pixies
+        p.draven_bounty_progress = self.draven_bounty_progress
+        p.rengar_takedowns = self.rengar_takedowns
+        p.ignited_shop_slots = list(self.ignited_shop_slots)
+        p.combats_since_overrun = self.combats_since_overrun
+        return p
 
     # -------------------------------------------------------------------------
     # Board & Unit Queries
@@ -455,6 +515,182 @@ class Player:
 
         return False
 
+    def auto_fill_board_from_bench(self, pool: ChampionPool) -> int:
+        """Automatically deploy strongest units from bench to board if board_unit_count < max_board_units.
+        
+        Matches official TFT behavior: when a round starts or player has empty board slots,
+        units are automatically placed from the bench onto vacant board hexes up to team size.
+        Returns the number of units deployed.
+        """
+        units_deployed = 0
+        while self.board_unit_count < self.max_board_units:
+            bench_candidates = [
+                (idx, u) for idx, u in enumerate(self.bench) if u is not None
+            ]
+            if not bench_candidates:
+                break
+
+            # Prioritize strongest units: star level descending, cost descending
+            bench_candidates.sort(key=lambda item: (item[1].star_level, item[1].cost), reverse=True)
+            best_idx, _ = bench_candidates[0]
+
+            # Find first available board hex (front row to back row)
+            placed = False
+            for r in range(self.set_data.board_rows):
+                for c in range(self.set_data.board_cols):
+                    if (r, c) not in self.board:
+                        if self.move_unit(from_is_board=False, from_loc=best_idx, to_is_board=True, to_loc=(r, c)):
+                            units_deployed += 1
+                            placed = True
+                            break
+                if placed:
+                    break
+
+            if not placed:
+                break
+
+        self.layout_board_tactically()
+        return units_deployed
+
+    def get_board_units_list(self) -> list[ChampionInstance]:
+        """Return list of active board units in stable sorted order (Star level desc, Cost desc, ID asc)."""
+        units = list(self.board.values())
+        units.sort(key=lambda u: (-u.star_level, -u.cost, str(u.champion_id)))
+        return units
+
+    def layout_board_tactically(self) -> None:
+        """Deterministic tactical board positioning algorithm.
+
+        Maps active board units to optimal (row, col) hexes based on role, durability, and items:
+        - Row 0 (Frontline center/flanks): Main Tanks (UnitRole.TANK) and high-HP bruisers.
+        - Row 1 (Second line): Melee Bruisers / Assassins (UnitRole.MELEE_DPS).
+        - Row 2 (Third line): Utility / Supports / Short-range casters.
+        - Row 3 (Backline corners/protected center): Primary Hyper-Carries (UnitRole.AD_CARRY, AP_CARRY).
+        """
+        units = list(self.board.values())
+        if not units:
+            self.board.clear()
+            return
+
+        # Hex priority preferences by row (center outward for tanks, protected corners for carries)
+        row_hex_priorities: dict[int, list[tuple[int, int]]] = {
+            0: [(0, 3), (0, 2), (0, 4), (0, 1), (0, 5), (0, 0), (0, 6)],  # Frontline center outward
+            1: [(1, 3), (1, 2), (1, 4), (1, 1), (1, 5), (1, 0), (1, 6)],  # Second line center outward
+            2: [(2, 3), (2, 2), (2, 4), (2, 1), (2, 5), (2, 0), (2, 6)],  # Third line
+            3: [(3, 1), (3, 5), (3, 2), (3, 4), (3, 0), (3, 6), (3, 3)],  # Backline corners protected
+        }
+
+        # Categorize units into target row preference
+        def get_preferred_row(u: ChampionInstance) -> int:
+            cdef = self.set_data.champions.get(u.champion_id)
+            role = cdef.role if cdef else UnitRole.UTILITY
+            tank_items = sum(1 for it in u.items if any(k in it for k in ("Warmog", "Bramble", "Dragon", "Gargoyle", "Sunfire", "Steadfast", "Stoneplate", "Vow")))
+            if tank_items >= 2 or role == UnitRole.TANK:
+                return 0
+            if role in (UnitRole.AD_CARRY, UnitRole.AP_CARRY):
+                return 3
+            return 1  # Utility / Front-mid default
+
+        units_by_row: dict[int, list[ChampionInstance]] = {0: [], 1: [], 2: [], 3: []}
+        for u in units:
+            target_r = get_preferred_row(u)
+            units_by_row[target_r].append(u)
+
+        for r in units_by_row:
+            units_by_row[r].sort(key=lambda u: (-u.star_level, -len(u.items), -u.cost))
+
+        new_board: dict[tuple[int, int], ChampionInstance] = {}
+        occupied_hexes: set[tuple[int, int]] = set()
+
+        for target_r in [0, 3, 1, 2]:
+            row_units = units_by_row[target_r]
+            for u in row_units:
+                placed = False
+                for hex_pos in row_hex_priorities[target_r]:
+                    if hex_pos not in occupied_hexes:
+                        new_board[hex_pos] = u
+                        occupied_hexes.add(hex_pos)
+                        u.position = hex_pos
+                        placed = True
+                        break
+                if not placed:
+                    fallback_rows = [0, 1, 2, 3] if target_r < 2 else [3, 2, 1, 0]
+                    for alt_r in fallback_rows:
+                        for hex_pos in row_hex_priorities[alt_r]:
+                            if hex_pos not in occupied_hexes:
+                                new_board[hex_pos] = u
+                                occupied_hexes.add(hex_pos)
+                                u.position = hex_pos
+                                placed = True
+                                break
+                        if placed:
+                            break
+
+        self.board = new_board
+
+    def deploy_bench_slot(self, bench_slot: int) -> bool:
+        """Deploy bench unit at bench_slot (0..8) onto active board with auto-layout."""
+        if self.board_unit_count >= self.max_board_units:
+            return False
+        if not (0 <= bench_slot < len(self.bench)):
+            return False
+        unit = self.bench[bench_slot]
+        if unit is None:
+            return False
+
+        self.bench[bench_slot] = None
+        for r in range(self.set_data.board_rows):
+            for c in range(self.set_data.board_cols):
+                if (r, c) not in self.board:
+                    unit.position = (r, c)
+                    self.board[(r, c)] = unit
+                    self.layout_board_tactically()
+                    return True
+        return False
+
+    def recall_board_slot(self, board_slot: int) -> bool:
+        """Recall board unit at board_slot (0..11) back to first free bench slot."""
+        if self.free_bench_slots <= 0:
+            return False
+        units = self.get_board_units_list()
+        if not (0 <= board_slot < len(units)):
+            return False
+        unit = units[board_slot]
+        pos = unit.position
+        if pos and pos in self.board:
+            del self.board[pos]
+        empty_bench_idx = next(i for i, s in enumerate(self.bench) if s is None)
+        self.bench[empty_bench_idx] = unit
+        unit.position = None
+        self.layout_board_tactically()
+        return True
+
+    def sell_board_slot(self, board_slot: int, pool: ChampionPool) -> bool:
+        """Sell board unit at board_slot (0..11)."""
+        units = self.get_board_units_list()
+        if not (0 <= board_slot < len(units)):
+            return False
+        unit = units[board_slot]
+        pos = unit.position
+        if pos and pos in self.board:
+            res = self.sell_unit(is_board=True, loc=pos, pool=pool)
+            self.layout_board_tactically()
+            return res
+        return False
+
+    def equip_item_to_board_slot(self, item_bench_idx: int, board_slot: int) -> bool:
+        """Equip item from item bench to board unit at board_slot (0..11)."""
+        units = self.get_board_units_list()
+        if not (0 <= board_slot < len(units)):
+            return False
+        unit = units[board_slot]
+        pos = unit.position
+        if pos and pos in self.board:
+            res = self.equip_item(item_bench_idx, is_board=True, target_loc=pos)
+            self.layout_board_tactically()
+            return res
+        return False
+
     def enforce_board_capacity(self, pool: ChampionPool) -> None:
         """Strictly enforce that board_unit_count <= max_board_units by benching or selling excess units."""
         while self.board_unit_count > self.max_board_units:
@@ -523,15 +759,23 @@ class Player:
         pool: ChampionPool,
     ) -> bool:
         """Sell a unit from board or bench, refunding gold and popping items."""
-        unit: ChampionInstance | None = None
+        unit: ChampionInstance | None
         if is_board and isinstance(loc, tuple):
-            unit = self.board.pop(loc, None)
+            unit = self.board.get(loc)
         elif not is_board and isinstance(loc, int) and 0 <= loc < len(self.bench):
             unit = self.bench[loc]
-            self.bench[loc] = None
+        else:
+            return False
 
         if unit is None:
             return False
+        if len(unit.items) > self.free_item_slots:
+            return False
+
+        if is_board and isinstance(loc, tuple):
+            del self.board[loc]
+        else:
+            self.bench[loc] = None
 
         # Return items to item bench
         for item_id in unit.items:
@@ -785,6 +1029,8 @@ class Player:
             unit = self.bench[loc]
 
         if unit is None or not unit.items:
+            return False
+        if len(unit.items) > self.free_item_slots:
             return False
 
         # Pop all items to item bench

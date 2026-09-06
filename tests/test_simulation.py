@@ -21,6 +21,7 @@ from tft_ai_player.simulation import (
     get_action_mask,
     get_default_set17_data,
 )
+from tft_ai_player.simulation.actions import execute_action
 
 
 @pytest.fixture
@@ -174,6 +175,64 @@ def test_item_combining_and_equipping(set_data: SetData) -> None:
     assert unit.items == ["TFT_Item_HextechGunblade"]
 
 
+def test_legacy_equip_action_assigns_and_crafts_on_priority_unit(
+    set_data: SetData, pool: ChampionPool
+) -> None:
+    """Legacy item actions must craft on the simulator's priority recipient."""
+    player = Player(0, set_data)
+    target = ChampionInstance(
+        champion_id="TFT17_Karma",
+        cost=4,
+        star_level=2,
+        items=["TFT_Item_BFSword"],
+    )
+    other = ChampionInstance(champion_id="TFT17_Aatrox", cost=1, star_level=1)
+    player.board[(0, 0)] = target
+    player.board[(0, 1)] = other
+    player.add_item("TFT_Item_NeedlesslyLargeRod")
+
+    action = 101
+    assert get_action_mask(player, set_data)[action]
+    assert execute_action(player, pool, set_data, action)
+    assert target.items == ["TFT_Item_HextechGunblade"]
+    assert other.items == []
+
+
+def test_moving_a_unit_preserves_its_equipped_items(set_data: SetData) -> None:
+    """Board movement may reposition a unit but must not detach its equipment."""
+    player = Player(0, set_data)
+    unit = ChampionInstance(
+        champion_id="TFT17_Karma",
+        cost=4,
+        star_level=2,
+        items=["TFT_Item_HextechGunblade"],
+    )
+    player.board[(0, 0)] = unit
+
+    assert player.move_unit(True, (0, 0), True, (1, 1))
+    assert player.board[(1, 1)].items == ["TFT_Item_HextechGunblade"]
+
+
+def test_full_item_bench_masks_sales_and_preserves_equipment(
+    set_data: SetData, pool: ChampionPool
+) -> None:
+    """Selling cannot discard equipped items when there is no item-bench space."""
+    player = Player(0, set_data)
+    unit = ChampionInstance(
+        champion_id="TFT17_Karma",
+        cost=4,
+        star_level=2,
+        items=["TFT_Item_HextechGunblade"],
+    )
+    player.board[(0, 0)] = unit
+    for _ in range(set_data.max_item_bench):
+        assert player.add_item("TFT_Item_BFSword")
+
+    assert not get_action_mask(player, set_data)[17]
+    assert not player.sell_unit(is_board=True, loc=(0, 0), pool=pool)
+    assert player.board[(0, 0)].items == ["TFT_Item_HextechGunblade"]
+
+
 def test_matchmaking_pairings(set_data: SetData) -> None:
     """Verify PvP matchmaking handles 8 players and odd player ghost boards."""
     engine = MatchmakingEngine()
@@ -321,25 +380,20 @@ def test_gymnasium_env_compliance() -> None:
     env = gym.make("TFT-v0")
     obs, info = env.reset(seed=123)
 
-    assert isinstance(obs, dict)
-    assert "player_stats" in obs
-    assert "board" in obs
-    assert "action_mask" in obs
-    assert obs["action_mask"].shape == (TOTAL_DISCRETE_ACTIONS,)
-    assert obs["action_mask"][0] == True  # PASS is always valid
+    assert isinstance(obs, np.ndarray)
+    assert obs.shape == (768,)
+    assert "action_mask" in info
+    assert info["action_mask"].shape == (TOTAL_DISCRETE_ACTIONS,)
+    assert info["action_mask"][0] == True  # PASS is always valid
 
     # Step PASS action
     next_obs, reward, terminated, truncated, next_info = env.step(0)
     assert isinstance(reward, float)
     assert isinstance(terminated, bool)
     assert "stage" in next_info
+    assert next_obs.shape == (768,)
+    assert "reward_breakdown" in next_info
 
-    # Test flat observation mode
-    flat_env = TFTEnv(use_flat_obs=True)
-    flat_obs, flat_info = flat_env.reset(seed=123)
-    assert isinstance(flat_obs, np.ndarray)
-    assert flat_obs.ndim == 1
-    assert len(flat_obs) == flat_env.encoder.flat_observation_dim
 
 
 def test_stage_aware_carousel_draft(set_data: SetData, pool: ChampionPool) -> None:
@@ -376,4 +430,65 @@ def test_stage_aware_carousel_draft(set_data: SetData, pool: ChampionPool) -> No
     # Costs in stage 5 should be 4 or 5-cost
     for ev in events_5:
         assert ev["cost"] in (4, 5)
+
+
+def test_auto_fill_board_from_bench(set_data: SetData, pool: ChampionPool) -> None:
+    """Verify auto_fill_board_from_bench transfers strongest bench units to fill empty board slots up to team size."""
+    player = Player(0, set_data)
+    player.level = 4  # Capacity = 4 units
+    assert player.max_board_units == 4
+    assert player.board_unit_count == 0
+
+    # Place 3 units on bench
+    u1 = ChampionInstance("TFT17_Aatrox", cost=1, star_level=1)
+    u2 = ChampionInstance("TFT17_Ahri", cost=3, star_level=2)
+    u3 = ChampionInstance("TFT17_Akali", cost=2, star_level=1)
+    player.bench[0] = u1
+    player.bench[1] = u2
+    player.bench[2] = u3
+
+    # Auto-fill: should move all 3 units to the board
+    deployed = player.auto_fill_board_from_bench(pool)
+    assert deployed == 3
+    assert player.board_unit_count == 3
+    assert player.bench[0] is None
+    assert player.bench[1] is None
+    assert player.bench[2] is None
+
+    # Now add 3 more units to bench (total would exceed team size of 4)
+    u4 = ChampionInstance("TFT17_Ashe", cost=2, star_level=1)
+    u5 = ChampionInstance("TFT17_Braum", cost=4, star_level=1)
+    u6 = ChampionInstance("TFT17_Caitlyn", cost=1, star_level=2)
+    player.bench[0] = u4
+    player.bench[1] = u5
+    player.bench[2] = u6
+
+    # Capacity is 4, currently 3 -> only 1 unit can be deployed.
+    # Candidates: u6 (2-star, cost 1), u5 (1-star, cost 4), u4 (1-star, cost 2)
+    # Strongest is u6 (star_level 2)
+    deployed_2 = player.auto_fill_board_from_bench(pool)
+    assert deployed_2 == 1
+    assert player.board_unit_count == 4
+    assert player.bench[2] is None  # u6 was deployed
+    assert player.bench[0] is not None
+    assert player.bench[1] is not None
+
+
+def test_round_win_loss_rewards_in_env(set_data: SetData) -> None:
+    """Verify gym_env awards multi-objective rewards (r_env, r_combat, r_interest, r_terminal, r_macro, r_micro)."""
+    env = TFTEnv(set_data=set_data)
+    obs, info = env.reset(seed=42)
+
+    # Perform PASS action to advance round
+    obs, reward, term, trunc, info = env.step(0)
+    assert "reward_breakdown" in info
+    rb = info["reward_breakdown"]
+    assert "r_env" in rb
+    assert "r_combat" in rb
+    assert "r_interest" in rb
+    assert "r_terminal" in rb
+    assert "r_macro" in rb
+    assert "r_micro" in rb
+
+
 

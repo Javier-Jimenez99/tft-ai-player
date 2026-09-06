@@ -62,3 +62,12 @@ def test_trainer_fit_evaluate_and_predict(tmp_path: Path) -> None:
         opponent_board=[{"unit": "TFT17_Aatrox", "tier": 1, "loc": "A1", "items": []}],
     )
     assert 0.0 <= prob <= 1.0
+
+    win_prob_a, dmg_a, dmg_b = predictor.predict_combat(
+        focal_board=[{"unit": "TFT17_Jinx", "tier": 2, "loc": "D1", "items": ["TFT_Item_InfinityEdge"]}],
+        opponent_board=[{"unit": "TFT17_Aatrox", "tier": 1, "loc": "A1", "items": []}],
+        round_stage="4-2",
+    )
+    assert 0.0 <= win_prob_a <= 1.0
+    assert isinstance(dmg_a, int) and dmg_a >= 1
+    assert isinstance(dmg_b, int) and dmg_b >= 1
