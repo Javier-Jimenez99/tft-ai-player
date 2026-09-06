@@ -22,17 +22,52 @@ from .dataset import (
     TimelineValidationError,
     extract_pvp_rounds,
 )
+from .dataset.downloader import (
+    MatchDownloadPipeline,
+    add_common_download_arguments,
+    get_existing_match_ids,
+    rotate_tor_identity,
+    setup_network_proxy,
+)
 from .dataset.models import normalize_tier
 from .metatft import LeaderboardPlayer, MetaTftClient, MetaTftRequestError, TrackedTimelineCandidate
+
+
+def _load_env_file(env_path: Path | str = ".env") -> None:
+    """Load environment variables from .env file into os.environ if present."""
+    p = Path(env_path)
+    if not p.exists():
+        # Fallback to repo root if current working directory doesn't have .env
+        p = Path(__file__).resolve().parent.parent.parent / ".env"
+        if not p.exists():
+            return
+    try:
+        with p.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                k = k.strip()
+                v = v.strip().strip("'\"")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+    except Exception:
+        pass
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command-line interface and return a process exit code."""
 
+    _load_env_file()
     parser = _build_parser()
     args = parser.parse_args(argv)
 
     try:
+        if args.command in ("daemon", "service", "continuous-collect"):
+            return _run_daemon(args)
+        if args.command in ("monitor", "dashboard"):
+            return _run_monitor(args)
         if args.command in ("expand-graph", "crawl-graph"):
             return _run_expand_graph(args)
         if args.command in ("download-games", "download-manifest"):
@@ -54,6 +89,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_rl_league(args)
         if args.command in ("rl-visualize-progression", "rl-plot-strategy", "rl-progression"):
             return _run_rl_visualize_progression(args)
+        if args.command in ("rl-plot-ranked", "plot-ranked"):
+            return _run_rl_plot_ranked(args)
+        if args.command in ("rl-eval-shadow", "eval-shadow"):
+            return _run_rl_eval_shadow(args)
+        if args.command in ("rl-train-shadow", "train-shadow"):
+            return _run_rl_train_shadow(args)
+        if args.command in ("rl-train-ranked", "train-ranked", "rl-ranked"):
+            return _run_rl_train_ranked(args)
         if args.command == "pretrain-trunk":
             return _run_pretrain_trunk(args)
         if args.command in ("cluster-compositions", "cluster"):
@@ -228,6 +271,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "--tier-partitioned",
         action="store_true",
         help="partition output CSV storage by tier directory (e.g. data/tiers/gold/players/)",
+    )
+    collect_parser.add_argument(
+        "--proxy",
+        type=str,
+        default=os.environ.get("ALL_PROXY") or os.environ.get("SOCKS_PROXY") or os.environ.get("HTTPS_PROXY"),
+        help="optional HTTP or SOCKS5 proxy URL (e.g. socks5://127.0.0.1:9050)",
+    )
+    collect_parser.add_argument(
+        "--tor-control-port",
+        type=int,
+        default=None,
+        help="optional Tor ControlPort (e.g. 9051) to instantly rotate IP identity on HTTP 429 rate limit",
     )
 
     timeline_parser = subcommands.add_parser(
@@ -412,6 +467,17 @@ def _build_parser() -> argparse.ArgumentParser:
         default=default_world_model_ckpt,
         help=f"path to pre-trained StateTransitionPredictor (World Model) checkpoint (default: {default_world_model_ckpt})",
     )
+    default_board_eval_ckpt = (
+        "models/board_evaluator/board_quality_best.pt"
+        if Path("models/board_evaluator/board_quality_best.pt").exists()
+        else None
+    )
+    rl_train_parser.add_argument(
+        "--board-evaluator-checkpoint",
+        type=str,
+        default=default_board_eval_ckpt,
+        help="path to trained BoardQualityNet checkpoint (Position/Placement Oracle for V6 lookahead)",
+    )
     rl_train_parser.add_argument(
         "--z-index-path",
         type=str,
@@ -565,6 +631,261 @@ def _build_parser() -> argparse.ArgumentParser:
         type=str,
         default="ppo_alphastar_v3",
         help="Weights & Biases run name to attach media artifacts to (default: ppo_alphastar_v3)",
+    )
+
+    ranked_plot_parser = subcommands.add_parser(
+        "rl-plot-ranked",
+        aliases=["plot-ranked"],
+        help="generate DeepMind AlphaStar-style ranked ladder progression plot",
+    )
+    ranked_plot_parser.add_argument(
+        "--log-path",
+        type=str,
+        default=None,
+        help="path to training log file (default: auto-detect latest task log)",
+    )
+    ranked_plot_parser.add_argument(
+        "--output-png",
+        type=str,
+        default="reports/visualizations/ranked_ladder_progression.png",
+        help="destination path for generated PNG",
+    )
+    ranked_plot_parser.add_argument(
+        "--agent-name",
+        type=str,
+        default="AlphaStar v6.2",
+        help="display name for agent trajectory in legend",
+    )
+    ranked_plot_parser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="open generated plot automatically",
+    )
+
+    shadow_eval_parser = subcommands.add_parser(
+        "rl-eval-shadow",
+        aliases=["eval-shadow"],
+        help="evaluate an RL checkpoint against authentic Challenger match traces",
+    )
+    shadow_eval_parser.add_argument(
+        "--model-checkpoint",
+        type=str,
+        required=True,
+        help="path to model.pt policy checkpoint file",
+    )
+    shadow_eval_parser.add_argument(
+        "--data-dir",
+        type=str,
+        default=r"D:\tft-winner-data\set18\players",
+        help="directory containing high-elo player CSVs",
+    )
+    shadow_eval_parser.add_argument(
+        "--cache-file",
+        type=str,
+        default=r"models/rl/shadow_matches_cache.pkl.gz",
+        help="path to cached indexed shadow matches",
+    )
+    shadow_eval_parser.add_argument(
+        "--matches",
+        type=int,
+        default=50,
+        help="number of real Challenger matches to evaluate against (default: 50)",
+    )
+    shadow_eval_parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="device to run evaluation on (default: auto)",
+    )
+
+    shadow_train_parser = subcommands.add_parser(
+        "rl-train-shadow",
+        aliases=["train-shadow"],
+        help="train AlphaStar v6.1 using PPO rollouts over authentic Challenger match traces",
+    )
+    shadow_train_parser.add_argument(
+        "--pretrained-checkpoint",
+        type=str,
+        default=r"D:\tft-winner-data\set18\models\rl\checkpoints\ppo_alphastar_v6\gen_0300\training_state.pt",
+        help="path to pretrained baseline checkpoint (default: v6 Gen 300)",
+    )
+    shadow_train_parser.add_argument(
+        "--checkpoint-dir",
+        type=str,
+        default=r"D:\tft-winner-data\set18\models\rl\checkpoints\ppo_alphastar_v6_1_shadow",
+        help="directory to save v6.1 checkpoints",
+    )
+    shadow_train_parser.add_argument(
+        "--cache-file",
+        type=str,
+        default=r"models/rl/shadow_matches_cache.pkl.gz",
+        help="path to cached indexed shadow matches",
+    )
+    shadow_train_parser.add_argument(
+        "--data-dir",
+        type=str,
+        default=r"D:\tft-winner-data\set18\players",
+        help="directory containing high-elo player CSVs",
+    )
+    shadow_train_parser.add_argument(
+        "--generations",
+        type=int,
+        default=300,
+        help="maximum training generations (default: 300)",
+    )
+    shadow_train_parser.add_argument(
+        "--rollout-steps",
+        type=int,
+        default=4096,
+        help="PPO rollout steps per generation (default: 4096)",
+    )
+    shadow_train_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=512,
+        help="PPO mini-batch size (default: 512)",
+    )
+    shadow_train_parser.add_argument(
+        "--lr",
+        type=float,
+        default=2.5e-4,
+        help="PPO learning rate (default: 2.5e-4)",
+    )
+    shadow_train_parser.add_argument(
+        "--eval-interval",
+        type=int,
+        default=25,
+        help="interval of generations between Challenger benchmark evaluations (default: 25)",
+    )
+    shadow_train_parser.add_argument(
+        "--snapshot-interval",
+        type=int,
+        default=50,
+        help="interval of generations between saving checkpoints (default: 50)",
+    )
+    shadow_train_parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="device to run training on: 'cpu' or 'cuda' (default: auto)",
+    )
+    shadow_train_parser.add_argument(
+        "--no-wandb",
+        action="store_true",
+        help="disable Weights & Biases logging",
+    )
+    shadow_train_parser.add_argument(
+        "--wandb-project",
+        type=str,
+        default="tft-ai-league",
+        help="Weights & Biases project name",
+    )
+    shadow_train_parser.add_argument(
+        "--run-name",
+        type=str,
+        default="ppo_alphastar_v6_1_shadow",
+        help="WandB run name and identifier",
+    )
+
+    ranked_train_parser = subcommands.add_parser(
+        "rl-train-ranked",
+        aliases=["train-ranked", "rl-ranked"],
+        help="train AlphaStar v6.2 on Adaptive Ranked Ladder using Top-1 replays (Bronze to Challenger)",
+    )
+    ranked_train_parser.add_argument(
+        "--pretrained-checkpoint",
+        type=str,
+        default=r"D:\tft-winner-data\set18\models\rl\checkpoints\ppo_alphastar_v6\gen_0300\training_state.pt",
+        help="path to pretrained baseline checkpoint (strictly v6 Gen 300)",
+    )
+    ranked_train_parser.add_argument(
+        "--checkpoint-dir",
+        type=str,
+        default=r"D:\tft-winner-data\set18\models\rl\checkpoints\ppo_alphastar_v6_2_ranked",
+        help="directory to save v6.2 ranked checkpoints",
+    )
+    ranked_train_parser.add_argument(
+        "--cache-file",
+        type=str,
+        default=r"models/rl/ranked_ladder_cache.pkl.gz",
+        help="path to cached Top-1 ranked ladder replays",
+    )
+    ranked_train_parser.add_argument(
+        "--tiers-dir",
+        type=str,
+        default=r"D:\tft-winner-data\tiers",
+        help="directory containing per-tier player folders",
+    )
+    ranked_train_parser.add_argument(
+        "--initial-tier",
+        type=str,
+        default="GOLD",
+        help="starting ranked ladder tier (default: GOLD)",
+    )
+    ranked_train_parser.add_argument(
+        "--initial-division",
+        type=int,
+        default=4,
+        help="starting ranked ladder division (default: 4)",
+    )
+    ranked_train_parser.add_argument(
+        "--initial-lp",
+        type=int,
+        default=0,
+        help="starting ranked LP (default: 0)",
+    )
+    ranked_train_parser.add_argument(
+        "--generations",
+        type=int,
+        default=300,
+        help="maximum training generations (default: 300)",
+    )
+    ranked_train_parser.add_argument(
+        "--rollout-steps",
+        type=int,
+        default=4096,
+        help="PPO rollout steps per generation (default: 4096)",
+    )
+    ranked_train_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=512,
+        help="PPO mini-batch size (default: 512)",
+    )
+    ranked_train_parser.add_argument(
+        "--lr",
+        type=float,
+        default=2.5e-4,
+        help="PPO learning rate (default: 2.5e-4)",
+    )
+    ranked_train_parser.add_argument(
+        "--snapshot-interval",
+        type=int,
+        default=50,
+        help="interval of generations between saving checkpoints (default: 50)",
+    )
+    ranked_train_parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="device to run training on: 'cpu' or 'cuda' (default: auto)",
+    )
+    ranked_train_parser.add_argument(
+        "--no-wandb",
+        action="store_true",
+        help="disable Weights & Biases logging",
+    )
+    ranked_train_parser.add_argument(
+        "--wandb-project",
+        type=str,
+        default="tft-ai-league",
+        help="Weights & Biases project name",
+    )
+    ranked_train_parser.add_argument(
+        "--run-name",
+        type=str,
+        default="ppo_alphastar_v6_2",
+        help="WandB run name and identifier",
     )
 
     pretrain_parser = subcommands.add_parser(
@@ -1138,7 +1459,195 @@ def _build_parser() -> argparse.ArgumentParser:
         help="playback frames per second for animated progression GIF (default: 24)",
     )
 
+    daemon_parser = subcommands.add_parser(
+        "daemon",
+        aliases=["service", "continuous-collect"],
+        help="run 24/7 continuous balanced data collection service on Raspberry Pi or server",
+    )
+    daemon_parser.add_argument(
+        "--output-dir",
+        "-o",
+        type=Path,
+        default=Path("data"),
+        help="destination directory where tiers/<tier>/players/*.csv will be written (default: data)",
+    )
+    daemon_parser.add_argument(
+        "--db-path",
+        type=Path,
+        default=Path("data/collector.db"),
+        help="path to the collector SQLite database (default: data/collector.db)",
+    )
+    daemon_parser.add_argument(
+        "--status-file",
+        type=Path,
+        default=Path("data/status.json"),
+        help="path to the JSON status heartbeat file (default: data/status.json)",
+    )
+    daemon_parser.add_argument(
+        "--tft-set",
+        default="TFTSet18",
+        help="TFT set to collect (default: TFTSet18)",
+    )
+    daemon_parser.add_argument(
+        "--request-interval",
+        type=float,
+        default=1.2,
+        help="seconds between requests to MetaTFT CDN / API (default: 1.2)",
+    )
+    daemon_parser.add_argument(
+        "--tier-weights",
+        type=str,
+        default=None,
+        help="custom tier distribution weights formatted as TIER:weight,TIER:weight (e.g. CHALLENGER:0.10,IRON:0.02)",
+    )
+    daemon_parser.add_argument(
+        "--min-disk-free-gb",
+        type=float,
+        default=2.0,
+        help="minimum free disk space in GB required before pausing collection (default: 2.0)",
+    )
+    daemon_parser.add_argument(
+        "--proxy",
+        type=str,
+        default=os.environ.get("ALL_PROXY") or os.environ.get("SOCKS_PROXY") or os.environ.get("HTTPS_PROXY"),
+        help="optional HTTP or SOCKS5 proxy URL",
+    )
+    daemon_parser.add_argument(
+        "--tor-control-port",
+        type=int,
+        default=None,
+        help="optional Tor ControlPort (e.g. 9051) to rotate IP identity on HTTP 429",
+    )
+    daemon_parser.add_argument(
+        "--no-wait-cooldown",
+        dest="auto_wait_cooldown",
+        action="store_false",
+        default=True,
+        help="do not automatically wait for CDN rate limit cooldown",
+    )
+    daemon_parser.add_argument(
+        "--riot-api-key",
+        type=str,
+        default=os.environ.get("RIOT_API_KEY"),
+        help="optional Riot Games API key to query official League endpoints when low-elo queues run dry",
+    )
+    daemon_parser.add_argument(
+        "--export-csv-interval",
+        type=float,
+        default=3600.0,
+        help="interval in seconds to export SQLite state to data/graph/*.csv for backward compatibility (default: 3600)",
+    )
+
+    monitor_parser = subcommands.add_parser(
+        "monitor",
+        aliases=["dashboard", "web-dashboard"],
+        help="run lightweight Web Dashboard and deterministic Telegram bot for TFT collector monitoring",
+    )
+    monitor_parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="host/interface to bind the Web Dashboard server to (default: 0.0.0.0)",
+    )
+    monitor_parser.add_argument(
+        "--port",
+        "-p",
+        type=int,
+        default=8080,
+        help="port for the Web Dashboard server (default: 8080)",
+    )
+    monitor_parser.add_argument(
+        "--output-dir",
+        "-o",
+        type=Path,
+        default=Path("data"),
+        help="root data directory containing tiers/ and status.json (default: data)",
+    )
+    monitor_parser.add_argument(
+        "--db-path",
+        type=Path,
+        default=Path("data/collector.db"),
+        help="path to SQLite collector database (default: data/collector.db)",
+    )
+    monitor_parser.add_argument(
+        "--status-file",
+        type=Path,
+        default=Path("data/status.json"),
+        help="path to status.json heartbeat file (default: data/status.json)",
+    )
+    monitor_parser.add_argument(
+        "--no-telegram",
+        action="store_true",
+        default=False,
+        help="disable the Telegram bot even if TELEGRAM_BOT_TOKEN is set",
+    )
+
     return parser
+
+
+def _run_monitor(args: argparse.Namespace) -> int:
+    """Run lightweight Web Dashboard and deterministic Telegram bot."""
+    import logging
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    from .dataset.monitor_service import run_monitor_service
+
+    run_monitor_service(
+        host=args.host,
+        port=args.port,
+        output_dir=args.output_dir,
+        db_path=args.db_path,
+        status_file=args.status_file,
+        enable_telegram=not getattr(args, "no_telegram", False),
+    )
+    return 0
+
+
+def _run_daemon(args: argparse.Namespace) -> int:
+    """Run continuous balanced collection service."""
+    import logging
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    from .dataset.collector_service import ContinuousCollectorService
+
+    tier_weights = None
+    if getattr(args, "tier_weights", None):
+        weights_dict = {}
+        for part in args.tier_weights.split(","):
+            if ":" in part:
+                t, _, w = part.partition(":")
+                try:
+                    weights_dict[t.strip().upper()] = float(w.strip())
+                except ValueError:
+                    pass
+        if weights_dict:
+            tier_weights = weights_dict
+
+    service = ContinuousCollectorService(
+        db_path=args.db_path,
+        output_dir=args.output_dir,
+        target_weights=tier_weights,
+        request_interval=args.request_interval,
+        tft_set=args.tft_set,
+        status_file=args.status_file,
+        proxy=args.proxy,
+        tor_control_port=args.tor_control_port,
+        auto_wait_cooldown=args.auto_wait_cooldown,
+        riot_api_key=args.riot_api_key,
+        min_disk_free_gb=args.min_disk_free_gb,
+        export_csv_interval=args.export_csv_interval,
+    )
+    service.run_forever()
+    return 0
 
 
 def _run_expand_graph(args: argparse.Namespace) -> int:
@@ -1515,56 +2024,8 @@ def _run_expand_graph(args: argparse.Namespace) -> int:
     return 0
 
 
-def _rotate_tor_identity(control_host: str = "127.0.0.1", control_port: int = 9051) -> bool:
-    """Request a fresh Tor circuit/IP by sending SIGNAL NEWNYM to Tor control port."""
-    try:
-        import socket
-        try:
-            import socks
-            raw_socket = socks.socksocket(socket.AF_INET, socket.SOCK_STREAM)
-            raw_socket.set_proxy()  # Direct localhost connection bypassing proxy monkeypatch
-        except Exception:
-            raw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        raw_socket.settimeout(5.0)
-        raw_socket.connect((control_host, control_port))
-        raw_socket.sendall(b'AUTHENTICATE ""\r\n')
-        auth_resp = raw_socket.recv(1024)
-        if b"250" not in auth_resp:
-            raw_socket.close()
-            return False
-        raw_socket.sendall(b"SIGNAL NEWNYM\r\n")
-        sig_resp = raw_socket.recv(1024)
-        raw_socket.close()
-        return b"250" in sig_resp
-    except Exception:
-        return False
-
-
-def _setup_proxy(proxy_str: str) -> None:
-    """Configure global socket or HTTP proxy for requests."""
-    from urllib.parse import urlparse
-    parsed = urlparse(proxy_str if "://" in proxy_str else f"socks5://{proxy_str}")
-    if parsed.scheme.startswith("socks"):
-        try:
-            import socks
-            import socket
-            proxy_type = socks.SOCKS5 if "5" in parsed.scheme else socks.SOCKS4
-            port = parsed.port or 1080
-            socks.set_default_proxy(
-                proxy_type,
-                parsed.hostname,
-                port,
-                rdns=True,
-                username=parsed.username,
-                password=parsed.password,
-            )
-            socket.socket = socks.socksocket
-        except ImportError:
-            raise RuntimeError("PySocks is required for SOCKS proxy support. Install with: pip install pysocks")
-    elif parsed.scheme.startswith("http"):
-        import os
-        os.environ["http_proxy"] = proxy_str
-        os.environ["https_proxy"] = proxy_str
+_rotate_tor_identity = rotate_tor_identity
+_setup_proxy = setup_network_proxy
 
 
 def _run_download_games(args: argparse.Namespace) -> int:
@@ -1940,76 +2401,8 @@ def _collect_profile(args: argparse.Namespace) -> int:
     return 0
 
 
-DEFAULT_MULTI_TIER_SEEDS: tuple[tuple[str, str, str, str], ...] = (
-    # Iron
-    ("euw1", "bombos973", "EUW", "IRON"),
-    ("euw1", "jiji123", "EUW", "IRON"),
-    ("euw1", "KnutTarDeg", "EUW", "IRON"),
-    ("euw1", "Emeloush", "65487", "IRON"),
-    ("euw1", "Darknight3", "EUW", "IRON"),
-    # Bronze
-    ("euw1", "Gin Ichimaru", "BLCH", "BRONZE"),
-    ("euw1", "Geep 5", "EUW", "BRONZE"),
-    ("euw1", "Chizindikiro", "81100", "BRONZE"),
-    ("euw1", "MezMez", "7615", "BRONZE"),
-    ("euw1", "shynlah", "1183", "BRONZE"),
-    # Silver
-    ("euw1", "PrincessPingui", "EUW", "SILVER"),
-    ("euw1", "Conso", "Prepu", "SILVER"),
-    ("euw1", "tomzer", "6155", "SILVER"),
-    ("la1", "KEIN", "Gato", "SILVER"),
-    ("euw1", "LaPaf Patrouille", "LEPAF", "SILVER"),
-    ("euw1", "roiloooo", "roilo", "SILVER"),
-    ("euw1", "I Bims 1 Udo", "EUW", "SILVER"),
-    ("la1", "Cizan", "Onion", "SILVER"),
-    ("la1", "zilber232", "LAN", "SILVER"),
-    ("la1", "Landhark", "GOT", "SILVER"),
-    ("la1", "Roaan", "LAN", "SILVER"),
-    ("la1", "Klinder05", "LAN", "SILVER"),
-    ("la1", "WISDOM", "gabi", "SILVER"),
-    ("euw1", "MiguelAFS", "EUW", "SILVER"),
-    # Gold
-    ("la1", "javi", "cjngg", "GOLD"),
-    ("euw1", "xHinkel", "EUW", "GOLD"),
-    ("euw1", "SAMY", "LES", "GOLD"),
-    ("la1", "ACM1PTSapee", "2409", "GOLD"),
-    ("la1", "LISIANTHUS", "Yith", "GOLD"),
-    ("la1", "hornytwink", "lcket", "GOLD"),
-    ("la1", "l Gio l", "LAN", "GOLD"),
-    ("la1", "EstebanCL", "LAN01", "GOLD"),
-    ("la1", "Greco4321", "revel", "GOLD"),
-    ("euw1", "sauceaigredoucee", "EUW", "GOLD"),
-    ("euw1", "ROI DES CAFARDS", "CLOPE", "GOLD"),
-    ("euw1", "Calldnathan", "cumin", "GOLD"),
-    ("euw1", "seven Bro 7", "BRo", "GOLD"),
-    ("euw1", "Sixxpk", "Sixx", "GOLD"),
-    ("euw1", "amleee", "EUW", "GOLD"),
-    ("euw1", "luciano219", "EUW", "GOLD"),
-    ("euw1", "GitanoBlanco", "EUW", "GOLD"),
-    ("euw1", "PAN4ELO", "1993", "GOLD"),
-    # Platinum
-    ("na1", "Javi", "401", "PLATINUM"),
-    ("na1", "Protos", "Colin", "PLATINUM"),
-    # Emerald
-    ("na1", "lettty", "420", "EMERALD"),
-    ("na1", "TheMagykal", "NA1", "EMERALD"),
-    ("na1", "TJF", "215", "EMERALD"),
-    # Master
-    ("na1", "Kurumx", "FREAK", "MASTER"),
-    ("euw1", "Sologesang", "EUW", "MASTER"),
-    # Grandmaster
-    ("na1", "prestivent", "NA1", "GRANDMASTER"),
-    ("na1", "robin", "007", "GRANDMASTER"),
-    # Challenger
-    ("na1", "Dishsoap", "NA1", "CHALLENGER"),
-    ("kr", "Bebe872", "KR1", "CHALLENGER"),
-    ("na1", "k3soju", "NA1", "CHALLENGER"),
-    ("na1", "Setsuko", "NA1", "CHALLENGER"),
-    ("na1", "Milala", "NA1", "CHALLENGER"),
-    ("na1", "Wasianiverson", "NA1", "CHALLENGER"),
-    ("euw1", "Double61", "EUW", "CHALLENGER"),
-    ("euw1", "Salvyyy", "EUW", "CHALLENGER"),
-)
+from .dataset.seeds import DEFAULT_MULTI_TIER_SEEDS
+
 
 
 def _collect_leaderboard(args: argparse.Namespace) -> int:
@@ -2019,6 +2412,10 @@ def _collect_leaderboard(args: argparse.Namespace) -> int:
         raise ValueError("games_per_player must be positive when provided")
     if args.max_games is not None and args.max_games <= 0:
         raise ValueError("max_games must be positive when provided")
+
+    proxy = getattr(args, "proxy", None) or os.environ.get("ALL_PROXY") or os.environ.get("SOCKS_PROXY") or os.environ.get("HTTPS_PROXY")
+    if proxy:
+        _setup_proxy(proxy)
 
     client = MetaTftClient(
         minimum_request_interval_seconds=getattr(args, "request_interval", 1.5),
@@ -2077,7 +2474,6 @@ def _collect_leaderboard(args: argparse.Namespace) -> int:
         # Check if Riot Developer API key is available for direct tier querying
         riot_api_key = getattr(args, "riot_api_key", None)
         if not riot_api_key:
-            import os
             riot_api_key = os.environ.get("RIOT_API_KEY")
 
         if riot_api_key:
@@ -2188,6 +2584,8 @@ def _collect_leaderboard(args: argparse.Namespace) -> int:
                 target_tiers=target_tiers,
                 games_by_tier=games_by_tier,
                 max_games_per_tier=max_games_per_tier,
+                tor_control_port=getattr(args, "tor_control_port", None),
+                auto_wait_cooldown=getattr(args, "auto_wait_cooldown", True),
             )
             total_written += written
             total_skipped += skipped
@@ -2264,6 +2662,8 @@ def _download_player_games(
     target_tiers: set[str] | None = None,
     games_by_tier: dict[str, int] | None = None,
     max_games_per_tier: int | None = None,
+    tor_control_port: int | None = None,
+    auto_wait_cooldown: bool = True,
 ) -> tuple[int, int]:
     """Download up to games_per_player unique games for one player, returning (written, skipped)."""
 
@@ -2281,12 +2681,29 @@ def _download_player_games(
             skipped += 1
             continue
 
-        try:
-            timeline = client.fetch_timeline(candidate.timeline_url)
-        except MetaTftRequestError as error:
-            # Temporary connection or HTTP request error: do NOT blacklist to allow retry in future runs.
-            tqdm.write(f"skipped game {game_id} from {player.riot_id} (temporary request error): {error}", file=sys.stderr)
-            seen_game_ids.add(game_id)
+        while True:
+            try:
+                timeline = client.fetch_timeline(candidate.timeline_url)
+                break
+            except MetaTftRequestError as error:
+                if "429" in str(error):
+                    if tor_control_port:
+                        tqdm.write(f"\n [!] HTTP 429 rate-limited on {game_id}. Rotating Tor IP circuit via port {tor_control_port}...")
+                        if _rotate_tor_identity(control_port=tor_control_port):
+                            tqdm.write("    --> Tor circuit rotated successfully. Retrying immediately.")
+                            time.sleep(2.0)
+                            continue
+                    if auto_wait_cooldown:
+                        tqdm.write(f"\n [!] HTTP 429 rate-limited on {game_id}. Waiting 30s cooldown...")
+                        time.sleep(30.0)
+                        continue
+                # Temporary connection or HTTP request error: do NOT blacklist to allow retry in future runs.
+                tqdm.write(f"skipped game {game_id} from {player.riot_id} (temporary request error): {error}", file=sys.stderr)
+                seen_game_ids.add(game_id)
+                timeline = None
+                break
+
+        if timeline is None:
             continue
 
         try:
@@ -2525,6 +2942,7 @@ def _run_rl_train(args: argparse.Namespace) -> int:
         set_data=get_set18_data(),
         trunk_checkpoint=args.trunk_checkpoint,
         world_model_checkpoint=args.world_model_checkpoint,
+        board_evaluator_checkpoint=getattr(args, "board_evaluator_checkpoint", None),
         z_index_path=args.z_index_path,
         round_winner_model_path=args.round_winner_model,
         lr=args.lr,
@@ -2636,6 +3054,163 @@ def _run_rl_visualize_progression(args: argparse.Namespace) -> int:
         except Exception:
             pass
 
+    return 0
+
+
+def _run_rl_plot_ranked(args: argparse.Namespace) -> int:
+    """Generate DeepMind AlphaStar-style ranked ladder progression figure."""
+    from pathlib import Path
+    from tft_ai_player.rl.visualization.ranked_progression_plot import generate_alphastar_ranked_ladder_plot
+
+    log_path = args.log_path
+    if not log_path:
+        # Search for latest active task log
+        tasks_dir = Path.home() / ".gemini" / "antigravity" / "brain"
+        candidates = list(tasks_dir.glob("*/.system_generated/tasks/*.log"))
+        ranked_logs = []
+        for c in candidates:
+            try:
+                txt = c.read_text(encoding="utf-8", errors="ignore")
+                if "[ALPHASTAR v6.2: RANKED LADDER TRAINING]" in txt:
+                    ranked_logs.append((c.stat().st_mtime, c))
+            except Exception:
+                pass
+        if ranked_logs:
+            ranked_logs.sort(key=lambda x: x[0], reverse=True)
+            log_path = str(ranked_logs[0][1])
+            print(f" [*] Auto-detected active training log: {log_path}")
+        else:
+            print(" [-] Could not find an active training log. Please specify --log-path.")
+            return 1
+
+    out_path = generate_alphastar_ranked_ladder_plot(
+        log_path=log_path,
+        output_png=args.output_png,
+        agent_name=args.agent_name,
+    )
+
+    if getattr(args, "open_browser", False):
+        import webbrowser
+        try:
+            webbrowser.open(out_path.resolve().as_uri())
+        except Exception:
+            pass
+
+    return 0
+
+
+def _run_rl_eval_shadow(args: argparse.Namespace) -> int:
+    """Benchmark an RL checkpoint against authentic Challenger match traces."""
+    import torch
+    from tft_ai_player.rl.models.networks import TFTActorCritic
+    from tft_ai_player.rl.shadow_match import ShadowMatchEvaluator, ShadowMatchLoader, ShadowMatchRepository
+    from tft_ai_player.simulation.sets.set18 import get_set18_data
+
+    device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
+    print("\n" + "=" * 75)
+    print(" [TFT SHADOW MATCH EVALUATION] Real Challenger Replay Benchmark")
+    print(f"  Checkpoint: {args.model_checkpoint}")
+    print(f"  Data Dir:   {args.data_dir}")
+    print(f"  Matches:    {args.matches} | Device: {device.upper()}")
+    print("=" * 75 + "\n")
+
+    # 1. Load or index replay repository
+    loader = ShadowMatchLoader(
+        data_dir=args.data_dir,
+        cache_path=args.cache_file,
+    )
+    repo = loader.load_repository()
+    print(f" [+] Loaded {len(repo.replays)} high-elo matches from shadow repository.\n")
+
+    # 2. Load policy checkpoint
+    ckpt_path = Path(args.model_checkpoint)
+    if ckpt_path.is_dir():
+        if (ckpt_path / "training_state.pt").exists():
+            ckpt_path = ckpt_path / "training_state.pt"
+        elif (ckpt_path / "weights.pt").exists():
+            ckpt_path = ckpt_path / "weights.pt"
+        elif (ckpt_path / "model.pt").exists():
+            ckpt_path = ckpt_path / "model.pt"
+
+    if not ckpt_path.exists():
+        print(f" [-] Checkpoint path does not exist: {ckpt_path}")
+        return 1
+
+    policy = TFTActorCritic(obs_dim=768, action_dim=111).to(device)
+    state_dict = torch.load(ckpt_path, map_location=device)
+    if "model" in state_dict:
+        policy.load_state_dict(state_dict["model"])
+    elif "policy" in state_dict:
+        policy.load_state_dict(state_dict["policy"])
+    elif "model_state_dict" in state_dict:
+        policy.load_state_dict(state_dict["model_state_dict"])
+    else:
+        policy.load_state_dict(state_dict)
+    policy.eval()
+
+    # 3. Evaluate
+    evaluator = ShadowMatchEvaluator(
+        repository=repo,
+        set_data=get_set18_data(),
+        device=device,
+    )
+    report = evaluator.evaluate_policy(policy, num_matches=args.matches, deterministic=True)
+    print("\n" + report.summary_string())
+
+    return 0
+
+
+def _run_rl_train_shadow(args: argparse.Namespace) -> int:
+    """Execute AlphaStar v6.1 PPO training over authentic Challenger match traces."""
+    from tft_ai_player.rl.shadow_match.train_shadow import ShadowTrainer
+    from tft_ai_player.simulation.sets.set18 import get_set18_data
+
+    trainer = ShadowTrainer(
+        set_data=get_set18_data(),
+        cache_file=args.cache_file,
+        data_dir=args.data_dir,
+        checkpoint_dir=args.checkpoint_dir,
+        pretrained_checkpoint=args.pretrained_checkpoint,
+        run_name=args.run_name,
+        max_generations=args.generations,
+        total_rollout_steps=args.rollout_steps,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        eval_interval=args.eval_interval,
+        snapshot_interval=args.snapshot_interval,
+        device=args.device,
+        use_wandb=not args.no_wandb,
+        wandb_project=args.wandb_project,
+    )
+    trainer.run_training_loop()
+    return 0
+
+
+def _run_rl_train_ranked(args: argparse.Namespace) -> int:
+    """Execute AlphaStar v6.2 PPO training dynamically adapting to ranked ladder tiers."""
+    from tft_ai_player.rl.shadow_match.train_ranked import RankedLadderTrainer
+    from tft_ai_player.simulation.sets.set18 import get_set18_data
+
+    trainer = RankedLadderTrainer(
+        set_data=get_set18_data(),
+        cache_file=args.cache_file,
+        tiers_dir=args.tiers_dir,
+        checkpoint_dir=args.checkpoint_dir,
+        pretrained_checkpoint=args.pretrained_checkpoint,
+        run_name=args.run_name,
+        initial_tier=args.initial_tier,
+        initial_division=args.initial_division,
+        initial_lp=args.initial_lp,
+        max_generations=args.generations,
+        total_rollout_steps=args.rollout_steps,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        snapshot_interval=args.snapshot_interval,
+        device=args.device,
+        use_wandb=not args.no_wandb,
+        wandb_project=args.wandb_project,
+    )
+    trainer.run_training_loop()
     return 0
 
 

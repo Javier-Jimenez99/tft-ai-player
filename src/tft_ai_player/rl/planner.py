@@ -54,8 +54,10 @@ class ShopBeamSearchPlanner:
         set_data: SetData,
         encoder: TFTStateEncoder | None = None,
         world_model: torch.nn.Module | None = None,
+        board_evaluator: torch.nn.Module | None = None,
         beam_width: int = 8,
         w_world: float = 1.0,
+        w_board_quality: float = 1.0,
         w_macro: float = 0.6,
         w_econ: float = 0.3,
         w_stars: float = 0.25,
@@ -66,8 +68,10 @@ class ShopBeamSearchPlanner:
         self.set_data = set_data
         self.encoder = encoder
         self.world_model = world_model
+        self.board_evaluator = board_evaluator
         self.beam_width = beam_width
         self.w_world = w_world
+        self.w_board_quality = w_board_quality
         self.w_macro = w_macro
         self.w_econ = w_econ
         self.w_stars = w_stars
@@ -108,7 +112,7 @@ class ShopBeamSearchPlanner:
         target_z: np.ndarray | torch.Tensor | None = None,
         s_hat_next: torch.Tensor | None = None,
     ) -> float:
-        """Evaluate candidate state using World Model and Trunk Embeddings."""
+        """Evaluate candidate state using BoardQualityNet or World Model and Trunk Embeddings."""
         if self.encoder is None:
             return self.compute_fast_heuristic(player)
 
@@ -121,8 +125,16 @@ class ShopBeamSearchPlanner:
 
         total_score = 0.0
 
-        # World Model Alignment: cos(s', ŝ_{t+1})
-        if s_hat_next is not None and self.w_world > 0.0:
+        # V6 Board Quality Oracle: Placement & Top-4 prediction from 320D trunk
+        if self.board_evaluator is not None and self.w_board_quality > 0.0:
+            pred_place, top4_logits = self.board_evaluator.forward_fused(s_cand.unsqueeze(0))
+            # E[Placement] ∈ [1.0, 8.0]. Convert to normalized reward in [0, 1]
+            board_quality = float((8.0 - pred_place.squeeze()).clamp(0.0, 7.0).item() / 7.0)
+            top4_prob = float(F.softmax(top4_logits, dim=-1)[0, 1].item())
+            total_score += self.w_board_quality * (0.6 * board_quality + 0.4 * top4_prob)
+
+        # Legacy / Fallback World Model Alignment: cos(s', ŝ_{t+1})
+        elif s_hat_next is not None and self.w_world > 0.0:
             world_sim = float(
                 F.cosine_similarity(s_cand.unsqueeze(0), s_hat_next.unsqueeze(0)).item()
             )

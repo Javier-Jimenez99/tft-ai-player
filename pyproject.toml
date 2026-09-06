@@ -19,6 +19,7 @@ dependencies = [
     "scikit-learn>=1.9.0",
     "scipy>=1.18.0",
     "seaborn>=0.13.0",
+    "pysocks>=1.7.1",
     "torch>=2.0.0",
     "tqdm>=4.67",
     "umap-learn>=0.5.12",

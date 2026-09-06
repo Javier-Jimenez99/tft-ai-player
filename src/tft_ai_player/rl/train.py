@@ -39,6 +39,7 @@ class LeagueTrainer:
         model: TFTActorCritic | None = None,
         trunk_checkpoint: str | Path | None = None,
         world_model_checkpoint: str | Path | None = None,
+        board_evaluator_checkpoint: str | Path | None = None,
         z_index_path: str | Path | None = None,
         round_winner_model_path: str | Path | None = None,
         lr: float = 2.5e-4,
@@ -119,6 +120,19 @@ class LeagueTrainer:
         for p in self.world_model.parameters():
             p.requires_grad = False
         self.world_model.to(self.device)
+
+        # 2b. Load BoardQualityNet (Position/Placement Oracle for V6)
+        self.board_evaluator = None
+        board_eval_path = board_evaluator_checkpoint or "models/board_evaluator/board_quality_best.pt"
+        if board_eval_path and Path(board_eval_path).exists():
+            try:
+                from tft_ai_player.board_evaluator.model import BoardQualityNet
+                self.board_evaluator = BoardQualityNet.load_checkpoint(
+                    board_eval_path, trunk=self.trunk, device=self.device
+                )
+                logger.info(f"Loaded BoardQualityNet from {board_eval_path} (V6 active)")
+            except Exception as e:
+                logger.warning(f"Could not load BoardQualityNet from {board_eval_path}: {e}")
 
         # 3. Load Z-Index centroids
         self.z_index_path = z_index_path
@@ -280,6 +294,8 @@ class LeagueTrainer:
             set_data=self.set_data,
             encoder=TFTStateEncoder(set_data=self.set_data, trunk=self.trunk, device=self.device),
             world_model=self.world_model,
+            board_evaluator=self.board_evaluator,
+            use_neural_eval=bool(self.board_evaluator is not None),
             beam_width=8,
             device=self.device,
         )
@@ -288,6 +304,7 @@ class LeagueTrainer:
             combat_resolver=self.combat_resolver,
             trunk=self.trunk,
             world_model=self.world_model,
+            board_evaluator=self.board_evaluator,
         )
         self.tournament_evaluator = TournamentEvaluator(
             league=self.league,
@@ -614,10 +631,17 @@ class LeagueTrainer:
         if generation > 0 and generation % self.eval_interval == 0:
             eval_metrics = self.bench_evaluator.evaluate_main_agent(self.model, num_matches=50)
             metrics.update(eval_metrics)
+            elo_msg = ""
+            if "eval_predicted_elo" in eval_metrics:
+                elo_msg = (
+                    f" | Elo: {eval_metrics['eval_predicted_elo']:.0f} ({eval_metrics.get('eval_predicted_tier', '')}) "
+                    f"[Trust: {eval_metrics.get('eval_composite_trust_score', 0):.0f}%, OOD: {eval_metrics.get('eval_inlier_confidence_pct', 0):.0f}%]"
+                )
             print(
                 f"  --> Benchmark Evaluation [Gen {generation}]: "
                 f"Avg Place: {eval_metrics['eval_avg_placement']:.2f} | "
-                f"Top-4: {eval_metrics['eval_top4_rate']*100:.1f}% | "
+                f"Top-4: {eval_metrics['eval_top4_rate']*100:.1f}%"
+                f"{elo_msg} | "
                 f"Alpha WR: {eval_metrics['bot_alpha_win_rate']*100:.1f}% | "
                 f"Beta WR: {eval_metrics['bot_beta_win_rate']*100:.1f}% | "
                 f"Gamma WR: {eval_metrics['bot_gamma_win_rate']*100:.1f}%"

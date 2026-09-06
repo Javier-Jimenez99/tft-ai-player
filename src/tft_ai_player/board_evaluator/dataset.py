@@ -23,13 +23,20 @@ from tft_ai_player.embeddings.vocab import ChampionVocabulary, ItemVocabulary, T
 
 def infer_placement_from_trajectory(last_stage: tuple[int, int], last_health: float) -> float:
     """Infer final match placement from the final survival round and health."""
-    if last_health > 0 and last_stage >= (6, 1):
-        return 1.0
-    if last_health > 0 and last_stage >= (5, 5):
-        return 2.0
+    if last_health > 0:
+        if last_stage >= (6, 4):
+            return 1.0
+        if last_stage >= (6, 1):
+            return 1.5
+        if last_stage >= (5, 5):
+            return 2.0
+        return 2.5
+
+    if last_stage >= (6, 1):
+        return 2.5
     if last_stage >= (5, 5):
         return 3.0
-    if last_stage >= (5, 1):
+    if last_stage >= (5, 2):
         return 4.0
     if last_stage >= (4, 5):
         return 5.0
@@ -175,14 +182,20 @@ class BoardPlacementDataset(Dataset):
             if not isinstance(u, dict):
                 continue
             loc = u.get("location") or u.get("hex") or u.get("cell") or 0
-            row, col = parse_loc_to_row_col(loc)
-            hex_idx = row * 7 + col
+            if isinstance(loc, int):
+                hex_idx = loc
+            elif isinstance(loc, str):
+                parsed = parse_loc_to_row_col(loc)
+                hex_idx = parsed[0] * 7 + parsed[1] if parsed else -1
+            else:
+                hex_idx = -1
+
             if 0 <= hex_idx < 28:
                 c_name = u.get("unit") or u.get("champion") or u.get("apiName") or ""
-                board_champs[hex_idx] = self.vocab[c_name]
+                board_champs[hex_idx] = self.vocab.encode(c_name)
                 board_stars[hex_idx] = int(u.get("tier") or u.get("star_level") or 1)
                 for it_i, it_name in enumerate(u.get("items", [])[:3]):
-                    board_items[hex_idx, it_i] = self.item_vocab[it_name]
+                    board_items[hex_idx, it_i] = self.item_vocab.encode(it_name)
 
         num_traits = max(1, len(self.trait_vocab))
         board_traits = torch.zeros(num_traits, dtype=torch.float32)

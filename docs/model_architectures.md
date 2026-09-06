@@ -4,8 +4,31 @@ This document provides the technical specification of the core machine learning 
 1. **Combat Round Winner & Damage Estimation System:** Fast tabular probabilistic battle outcome and player damage predictor.
 2. **Multi-Modal State Representation Trunk & Embeddings:** Robust PyTorch Transformer representation learning system producing dense, permutation-invariant embeddings.
 3. **Composition Archetype Extraction & Latent Clustering (Z-Index):** Unsupervised latent geometric clustering distilling meta board archetypes into canonical reference centroids ($Z$-Index) to anchor goal-directed strategic decision making.
+4. **State Transition Predictor (World Model):** Latent macro-trajectory dynamics model.
+5. **Reinforcement Learning & AlphaStar League Pipeline (v6 Baseline):** Multi-agent self-play league and prioritized fictitious play.
+6. **AlphaStar v6.1: Trace-Driven Shadow Match Reinforcement Learning:** PPO fine-tuning directly embedded in real-world high-Elo human matches.
+7. **AlphaStar v6.2: Adaptive Ranked Ladder RL (Curriculum MMR Progression):** Multi-tier competitive climbing from Oro to Challenger with empirical survival tables and LP rewards.
 
 ---
+
+## 0. Model Versioning & Pipeline Nomenclature Standard
+
+To ensure absolute traceability across multi-phase training regimes, the project adheres to a strict hierarchical semantic versioning convention:
+
+$$\mathbf{v}\langle \text{Phase 1: Foundation / Self-Play} \rangle \,.\, \langle \text{Phase 2: Human Trace / Ranked Ladder} \rangle \,.\, \langle \text{Phase 3: Superhuman League / Self-Play Hardening} \rangle$$
+
+### Version Breakdown:
+1. **Major Version (`vX` — Phase 1: Foundation Gym / Self-Play League):**
+   * Represents the fundamental agent architecture, state encoding trunk, action space factorizations, and the multi-agent Self-Play baseline.
+   * *Example:* **`v6`** (AlphaStar Multi-Agent League with 15 Exploiters, Tree-Search Lookahead Planner, and Z-Centroid conditioning).
+2. **Minor Version (`vX.Y` — Phase 2: Human Trace-Driven / Ranked Ladder branches):**
+   * Represents parallel or distinct methodology branches grounded in real human matches, **all initialized directly from the base vX checkpoint** (`v6/gen_0300`).
+   * *Examples:*
+     * **`v6.1`**: Shadow Match RL directly embedded against high-Elo Challenger match traces (branched from `v6`).
+     * **`v6.2`**: Adaptive Ranked Ladder RL (dynamic MMR/ELO system climbing through Bronze $\to$ Challenger with league-specific empirical round death distributions and LP rewards, branched from `v6`).
+3. **Patch Version (`vX.Y.Z` — Phase 3: Superhuman Hardening / Full Self-Play):**
+   * Represents post-human self-play specialization, where an agent that has mastered human play plays against copies of itself to surpass human meta ceilings.
+   * *Example:* **`v6.2.1`** (Full Self-Play League initialized from the `v6.2` Master/Challenger-ranked policy to discover strategies beyond human play).
 
 ## 1. Combat Round Winner & Damage Estimation System
 
@@ -448,6 +471,137 @@ We profiled both surrogate combat engines across single 1v1 matchups, batched pa
 #### 2. Microbenchmark Latency & Throughput Scaling
 * **In-RL Latent Reuse:** Reusing the already computed $s_t / \mathbf{h}_{\text{board}}$ embeddings on GPU takes **`0.324 ms`** per match (**`3,089 matches/s`**), achieving a **`16.1x speedup`** over LightGBM ($5.20\text{ ms}$).
 * **Batched Parallel Scaling ($N = 4,096$):** Deep Learning GPU processes **`162,040 matches/s`** vs LightGBM's **`3,565 matches/s`** (**`45.5x throughput gain`**).
+
+---
+
+## 6. AlphaStar v6.1: Trace-Driven Shadow Match Reinforcement Learning
+
+### 6.1 Concept & Motivation
+In standard self-play reinforcement learning (v6 baseline), the agent spars against copies of itself, exploiters, and historical league snapshots. While effective for learning combinatorial synergies, synthetic bots can develop non-human eccentricities or "meta bubbles" that differ from real human lobbies.
+
+**AlphaStar v6.1 (Shadow Match RL)** solves this by embedding the PPO agent as a **"Shadow Player"** directly inside real, historical Challenger/Grandmaster matches:
+* Rather than simulating 7 bot opponents, we load real chronological timeline trajectories from high-Elo human matches.
+* In each round, the AI receives authentic shop rolls, player health states, and economic resources, and fights against the **actual opponent board** that the human player faced in that exact round.
+* The agent makes its own decisions (buying, selling, positioning, leveling, rolling, equipping items), but combats are resolved against authentic human boards using the Deep Learning Combat Resolver.
+
+```
+                    Historical Challenger Match Trace (t = 1 .. T)
+                                      │
+                    ┌─────────────────┴─────────────────┐
+                    ▼                                   ▼
+        Focal Player Seed Conditions          Opponent Board at Stage t
+        (Starting Gold, Items, Level)         (Authentic Challenger Board)
+                    │                                   │
+                    ▼                                   ▼
+      PPO Actor-Critic + Lookahead Planner         DL Combat Resolver
+           (AlphaStar v6.1 Policy)             (GPU Siamese / Trunk Net)
+                    │                                   │
+                    └─────────────────┬─────────────────┘
+                                      ▼
+                         Victory / Damage Outcome
+                                      │
+                    ┌─────────────────┴─────────────────┐
+                    ▼                                   ▼
+        Focal Agent State Updates               PPO Rollout Buffer
+        (HP, Economy, Streak, Bench)        (s_t, a_t, r_t, v_t, log_pi)
+```
+
+---
+
+### 6.2 Shadow Environment Mechanics ([`ShadowMatchEnv`](file:///c:/Users/javij/Desktop/Proyectos/tft-ai-player/src/tft_ai_player/rl/shadow_match/shadow_env.py))
+
+1. **Replay Repository & Trace Sampling:**
+   * Replays are parsed and cached from high-Elo player timeline data into [`ShadowMatchRepository`](file:///c:/Users/javij/Desktop/Proyectos/tft-ai-player/src/tft_ai_player/rl/shadow_match/replay_loader.py) ($>2,500$ top-tier games).
+   * At `reset()`, a match is sampled, and the agent begins from the human player's starting state.
+2. **Sequential Phase Loop:**
+   * **Planning Phase:** The agent executes factorized discrete actions ($a \in \{0 \dots 110\}$) with pre-softmax valid action masking until it selects `PASS_ROUND` ($a = 0$).
+   * **Combat Resolution:** The agent's real-time board is evaluated against the historical opponent's board for that round.
+   * **Damage & Economy:** Standard TFT rules apply (combat win/loss streak bonuses, base round income $+5$, interest capped at $50\text{g}$, player damage calculation).
+3. **Termination & Survival:**
+   * If the agent's HP drops to $\le 0$, the episode terminates.
+   * If the agent survives past the final round recorded in the trace, it earns a victory terminal reward.
+
+---
+
+### 6.3 Reward Decomposition & Alignment
+
+AlphaStar v6.1 uses a decomposed multi-objective reward structure identical in logging format to the v6 baseline:
+
+$$R_{\text{step}} = R_{\text{combat}} + R_{\text{interest}} + R_{\text{terminal}} + R_{\text{env}}$$
+
+* **Combat Reward ($R_{\text{combat}}$):** $+0.5$ per combat victory; $-0.02 \times \text{Damage}$ on defeat.
+* **Interest Reward ($R_{\text{interest}}$):** $+0.05$ per round when holding $\ge 50\text{g}$ to encourage strong economic habits.
+* **Terminal Reward ($R_{\text{terminal}}$):** Scaled by survival relative to the original Challenger player ($+2.0$ for outlasting the match, $-1.0$ to $-2.0$ for early elimination).
+* **Environment Reward ($R_{\text{env}}$):** Total environment transition reward.
+
+---
+
+### 6.4 Training Architecture & CLI Integration
+
+* **Trainer Class:** [`ShadowTrainer`](file:///c:/Users/javij/Desktop/Proyectos/tft-ai-player/src/tft_ai_player/rl/shadow_match/train_shadow.py), subclassing [`LeagueTrainer`](file:///c:/Users/javij/Desktop/Proyectos/tft-ai-player/src/tft_ai_player/rl/train.py).
+* **Warm-Start Initialization:** Initializes directly from the baseline v6 Gen 300 checkpoint (`training_state.pt`), preserving learned tactical knowledge while adapting to authentic Challenger boards.
+* **Command:**
+  ```powershell
+  .venv\Scripts\python.exe -m tft_ai_player.cli rl-train-shadow `
+      --pretrained-checkpoint D:/tft-winner-data/set18/models/rl/checkpoints/ppo_alphastar_v6/gen_0300/training_state.pt `
+      --checkpoint-dir D:/tft-winner-data/set18/models/rl/checkpoints/ppo_alphastar_v6_1_shadow `
+      --generations 300 `
+      --device cuda `
+      --run-name ppo_alphastar_v6_1
+  ```
+* **Periodic Evaluation ([`ShadowMatchEvaluator`](file:///c:/Users/javij/Desktop/Proyectos/tft-ai-player/src/tft_ai_player/rl/shadow_match/evaluator.py)):**
+  Evaluates 30 held-out Challenger matches every 25 generations, reporting estimated placement, top-4 rate, win rate, and combat win rate against authentic human opponents.
+
+---
+
+## 7. AlphaStar v6.2: Adaptive Ranked Ladder RL (Curriculum MMR Progression)
+
+### 7.1 Concept & Branching Architecture
+* **Branching Root:** In accordance with the versioning standard, **AlphaStar v6.2 branches directly from the base `v6` Gen 300 checkpoint** (`ppo_alphastar_v6/gen_0300/training_state.pt`). It represents an alternative Phase 2 regime to `v6.1`.
+* **The Problem with Direct High-Elo Ingestion (`v6.1`):** In `v6.1`, dropping the agent exclusively into Challenger lobbies creates an overly steep penalty cliff: at early generations, the agent survives comfortably through Stage 4 (~20-25 rounds) but gets out-scaled in Stage 5, collapsing the policy into heavy reroll panic instead of learning active XP pacing.
+* **The Solution (`v6.2`):** Rather than a static environment, `v6.2` introduces an **Adaptive Ranked Matchmaking Ladder**:
+  1. The agent starts with an initial MMR / Division (e.g. **Gold IV** / $1,200\text{ Elo}$).
+  2. The environment samples exclusively from **1st-place real human matches** matching the agent's current rank tier.
+  3. When the agent finishes an episode, its final survival round is translated into an empirical lobby placement according to that specific tier's survival curve.
+  4. The agent gains or loses League Points (LP / MMR). If it accumulates $+100\text{ LP}$, it promotes to the next division; if it falls below $0\text{ LP}$, it demotes.
+  5. The next rollout dynamically samples from the new tier's replay pool.
+
+```
+                   Current Agent MMR / Tier (e.g. Gold -> Platinum -> Emerald -> Challenger)
+                                                │
+                                                ▼
+                         Sample 1st-Place Human Match from Current Tier
+                                                │
+                                                ▼
+                                PPO Actor-Critic Rollout Step
+                               (Shop, Buy, Level, Position, Equip)
+                                                │
+                                                ▼
+                           Empirical Placement Determination (1st to 8th)
+                               (Rank-Specific Stage Death Distribution)
+                                                │
+                                ┌───────────────┴───────────────┐
+                                ▼                               ▼
+                         LP Delta (±10 to ±40)           PPO Reward Signal
+                         Promotion / Demotion          R_step = R_combat + R_LP
+```
+
+### 7.2 Tier Progression & Promotion Logic
+* **Tiers Supported:** Bronze $\to$ Silver $\to$ Gold $\to$ Platinum $\to$ Emerald $\to$ Diamond $\to$ Master $\to$ Grandmaster $\to$ Challenger.
+* **Tier Partitions:** Mapped directly to disk paths (`D:/tft-winner-data/tiers/{tier}/players/`).
+* **LP Economy:**
+  * **1st Place:** $+40\text{ LP}$
+  * **2nd Place:** $+30\text{ LP}$
+  * **3rd Place:** $+20\text{ LP}$
+  * **4th Place:** $+10\text{ LP}$
+  * **5th Place:** $-10\text{ LP}$
+  * **6th Place:** $-20\text{ LP}$
+  * **7th Place:** $-30\text{ LP}$
+  * **8th Place:** $-40\text{ LP}$
+* **Promotions:** Reaching $100\text{ LP}$ advances division (IV $\to$ III $\to$ II $\to$ I $\to$ Next Tier).
+* **Demotions:** Falling below $0\text{ LP}$ demotes with a grace buffer.
+
+
 
 
 

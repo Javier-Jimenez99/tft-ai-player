@@ -19,3 +19,13 @@ tft_simulation_dashboard*.html
 models/
 checkpoints/
 wandb/
+
+# Environment variables and API keys
+.env
+.env.*
+*.env
+!.env.example
+*.key
+*.token
+secrets/
+temp_pytest/

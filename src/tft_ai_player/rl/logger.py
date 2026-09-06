@@ -220,7 +220,29 @@ def format_wandb_payload(raw_metrics: dict[str, Any]) -> dict[str, Any]:
         if k.startswith("Exploiter/") and isinstance(v, (int, float)):
             payload[k] = float(v)
 
+    # =========================================================================
+    # SECTION 9: COMPETITIVE ELO & OOD CONFIDENCE (Full-Match Regressor & Solution Space)
+    # =========================================================================
+    if "eval_predicted_elo" in raw_metrics and raw_metrics["eval_predicted_elo"] is not None:
+        payload["Elo_Evaluation/Predicted_Competitive_Elo"] = float(raw_metrics["eval_predicted_elo"])
+    if "eval_composite_trust_score" in raw_metrics and raw_metrics["eval_composite_trust_score"] is not None:
+        payload["Elo_Evaluation/Composite_Trust_Score_Pct"] = float(raw_metrics["eval_composite_trust_score"])
+    if "eval_inlier_confidence_pct" in raw_metrics and raw_metrics["eval_inlier_confidence_pct"] is not None:
+        payload["Elo_Evaluation/OOD_Inlier_Confidence_Pct"] = float(raw_metrics["eval_inlier_confidence_pct"])
+    if "eval_mahalanobis_distance" in raw_metrics and raw_metrics["eval_mahalanobis_distance"] is not None:
+        payload["Elo_Evaluation/Mahalanobis_Distance"] = float(raw_metrics["eval_mahalanobis_distance"])
+    if "eval_sanity_score" in raw_metrics and raw_metrics["eval_sanity_score"] is not None:
+        payload["Elo_Evaluation/TFT_Sanity_Score_Pct"] = float(raw_metrics["eval_sanity_score"])
+    if "eval_predicted_tier" in raw_metrics and raw_metrics["eval_predicted_tier"] is not None:
+        payload["Elo_Evaluation/Predicted_Tier"] = str(raw_metrics["eval_predicted_tier"])
+
+    # Pass through any pre-formatted or unmapped metrics (e.g. Shadow Match metrics)
+    for k, v in raw_metrics.items():
+        if "/" in k and isinstance(v, (int, float)):
+            payload[k] = float(v)
+
     return payload
+
 
 
 class WandBSingleRun:
@@ -274,7 +296,22 @@ class WandBSingleRun:
             data=json.dumps({"query": mutation, "variables": {"input": input_vars}}).encode("utf-8"),
             headers=headers,
         )
-        urllib.request.urlopen(req, timeout=10)
+        try:
+            urllib.request.urlopen(req, timeout=10)
+        except urllib.error.HTTPError as err:
+            if err.code == 410:
+                # The run ID was previously deleted in WandB and cannot be reused
+                self.run_id = f"{self.run_id}_{int(time.time())}"
+                input_vars["name"] = self.run_id
+                self.dashboard_url = f"https://wandb.ai/{self.entity}/{self.project}/runs/{self.run_id}"
+                req = urllib.request.Request(
+                    "https://api.wandb.ai/graphql",
+                    data=json.dumps({"query": mutation, "variables": {"input": input_vars}}).encode("utf-8"),
+                    headers=headers,
+                )
+                urllib.request.urlopen(req, timeout=10)
+            else:
+                raise
 
     def log(self, metrics: dict[str, Any], step: int) -> None:
         """Stream metrics to WandB FileStream API."""

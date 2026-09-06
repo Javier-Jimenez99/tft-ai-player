@@ -102,6 +102,12 @@ class RiotTftClient:
 
         try:
             payload = self._get_json(url)
+        except HTTPError as error:
+            if error.code in (401, 403):
+                logger.warning("Riot API returned HTTP %d: Unauthorized or Forbidden. Key is invalid or expired.", error.code)
+                raise
+            logger.error("Failed to query Riot league for tier %s (%s): %s", tier_upper, reg, error)
+            return []
         except Exception as error:
             logger.error("Failed to query Riot league for tier %s (%s): %s", tier_upper, reg, error)
             return []

@@ -25,3 +25,15 @@ def test_riot_tft_client_fetch_tier_players() -> None:
     assert len(players) == 2
     assert players[0].riot_id == "GoldPlayer1#NA1"
     assert players[1].riot_id == "GoldPlayer2#NA1"
+
+
+def test_riot_tft_client_401_raises() -> None:
+    from urllib.error import HTTPError
+    client = RiotTftClient("BAD-KEY")
+    err = HTTPError(url="https://na1.api.riotgames.com", code=401, msg="Unauthorized", hdrs={}, fp=None)
+    client._get_json = MagicMock(side_effect=err)
+
+    import pytest
+    with pytest.raises(HTTPError) as exc_info:
+        client.fetch_tier_players("IRON", region="na1")
+    assert exc_info.value.code == 401

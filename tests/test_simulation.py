@@ -322,7 +322,7 @@ def test_gymnasium_env_compliance() -> None:
     obs, info = env.reset(seed=123)
 
     assert isinstance(obs, np.ndarray)
-    assert obs.shape == (704,)
+    assert obs.shape == (768,)
     assert "action_mask" in info
     assert info["action_mask"].shape == (TOTAL_DISCRETE_ACTIONS,)
     assert info["action_mask"][0] == True  # PASS is always valid
@@ -332,7 +332,7 @@ def test_gymnasium_env_compliance() -> None:
     assert isinstance(reward, float)
     assert isinstance(terminated, bool)
     assert "stage" in next_info
-    assert next_obs.shape == (704,)
+    assert next_obs.shape == (768,)
     assert "reward_breakdown" in next_info
 
 

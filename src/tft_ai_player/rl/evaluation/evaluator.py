@@ -36,11 +36,13 @@ class BenchmarkBotEvaluator:
         combat_resolver: Any | None = None,
         trunk: MultiModalFusionTrunk | None = None,
         world_model: Any | None = None,
+        board_evaluator: Any | None = None,
     ) -> None:
         self.set_data = set_data or get_default_set17_data()
         self.combat_resolver = combat_resolver
         self.trunk = trunk
         self.world_model = world_model
+        self.board_evaluator = board_evaluator
 
     def evaluate_main_agent(
         self,
@@ -51,6 +53,8 @@ class BenchmarkBotEvaluator:
         """Run evaluation matches where Main Agent plays in 8-player lobbies against benchmark bots.
 
         Lobby composition: 1 Main Agent + 3 Bot Alpha + 2 Bot Beta + 2 Bot Gamma.
+        Also tracks full match trajectories to compute competitive Elo, OOD inlier confidence,
+        and TFT domain sanity scores.
         """
         main_model.eval()
         main_bot = RLBot(
@@ -58,6 +62,7 @@ class BenchmarkBotEvaluator:
             set_data=self.set_data,
             trunk=self.trunk,
             world_model=self.world_model,
+            board_evaluator=self.board_evaluator,
             deterministic=True,
             use_planner=True,
         )
@@ -69,6 +74,7 @@ class BenchmarkBotEvaluator:
         total_encounters_alpha = 0
         total_encounters_beta = 0
         total_encounters_gamma = 0
+        trajectories: list[list[dict[str, Any]]] = []
 
         for m_idx in range(num_matches):
             game = TFTGame(set_data=self.set_data, combat_resolver=self.combat_resolver)
@@ -86,6 +92,8 @@ class BenchmarkBotEvaluator:
                 BotGammaGreedy(),
             ]
 
+            match_traj: list[dict[str, Any]] = []
+
             while not game.is_over:
                 for idx, player in enumerate(game.players):
                     if player.alive:
@@ -97,11 +105,35 @@ class BenchmarkBotEvaluator:
                             stage=rinfo.stage,
                             round_in_stage=rinfo.round_in_stage,
                         )
+
+                # Snapshot state of main agent before combat resolution
+                main_player = game.players[0]
+                if main_player.alive:
+                    rinfo = game.stage_manager.get_current_round_info()
+                    board_units = []
+                    for unit in main_player.board.values():
+                        board_units.append({
+                            "cost": unit.cost,
+                            "star_level": unit.star_level,
+                            "items": [getattr(it, "name", str(it)) for it in unit.items],
+                            "traits": getattr(unit, "traits", []),
+                        })
+                    match_traj.append({
+                        "round_stage": f"{rinfo.stage}-{rinfo.round_in_stage}",
+                        "focal_health": main_player.health,
+                        "focal_level": main_player.level,
+                        "focal_gold": main_player.gold,
+                        "outcome": "victory" if getattr(main_player, "won_last_round", False) else "defeat",
+                        "focal_board": board_units,
+                    })
+
                 game.resolve_round_phase()
 
             main_player = game.players[0]
             main_place = main_player.placement or 8
             placements.append(main_place)
+            if match_traj:
+                trajectories.append(match_traj)
 
             # Track relative wins vs benchmark bot archetypes
             for opp_idx in range(1, 8):
@@ -127,7 +159,7 @@ class BenchmarkBotEvaluator:
         beta_wr = float(wins_vs_beta / max(1, total_encounters_beta))
         gamma_wr = float(wins_vs_gamma / max(1, total_encounters_gamma))
 
-        return {
+        result_dict: dict[str, Any] = {
             "eval_avg_placement": avg_placement,
             "eval_win_rate": win_rate,
             "eval_top4_rate": top4_rate,
@@ -136,6 +168,40 @@ class BenchmarkBotEvaluator:
             "bot_gamma_win_rate": gamma_wr,
             "eval_matches": float(num_matches),
         }
+
+        # Compute competitive Elo, OOD inlier confidence, and Sanity score across trajectories
+        if trajectories:
+            try:
+                from tft_ai_player.elo_predictor.evaluator import evaluate_game_trajectory
+                elo_scores = []
+                trust_scores = []
+                inlier_confs = []
+                mahalanobis_dists = []
+                sanity_scores = []
+
+                # Sample up to 20 evaluation trajectories
+                sample_trajs = trajectories[:20]
+                for traj in sample_trajs:
+                    report = evaluate_game_trajectory(traj)
+                    elo_scores.append(report["predicted_elo"])
+                    trust_scores.append(report["composite_trust_score"])
+                    inlier_confs.append(report["inlier_confidence_pct"])
+                    mahalanobis_dists.append(report["mahalanobis_distance"])
+                    sanity_scores.append(report["sanity"]["sanity_score"])
+
+                if elo_scores:
+                    from tft_ai_player.elo_predictor.model import elo_to_tier_name
+                    mean_elo = float(np.mean(elo_scores))
+                    result_dict["eval_predicted_elo"] = mean_elo
+                    result_dict["eval_composite_trust_score"] = float(np.mean(trust_scores))
+                    result_dict["eval_inlier_confidence_pct"] = float(np.mean(inlier_confs))
+                    result_dict["eval_mahalanobis_distance"] = float(np.mean(mahalanobis_dists))
+                    result_dict["eval_sanity_score"] = float(np.mean(sanity_scores))
+                    result_dict["eval_predicted_tier"] = elo_to_tier_name(mean_elo)
+            except Exception as e:
+                logger.debug(f"Elo evaluation skipped during benchmark: {e}")
+
+        return result_dict
 
 
 class TournamentEvaluator:

@@ -49,6 +49,7 @@ class RLBot:
         set_data: SetData,
         trunk: MultiModalFusionTrunk | None = None,
         world_model: torch.nn.Module | None = None,
+        board_evaluator: torch.nn.Module | None = None,
         target_z: np.ndarray | None = None,
         z_index: int | None = None,
         z_centroids: np.ndarray | None = None,
@@ -66,6 +67,7 @@ class RLBot:
         self.model = model
         self.set_data = set_data
         self.world_model = world_model
+        self.board_evaluator = board_evaluator
         self.target_z = target_z
         self.z_index = z_index
         self.z_centroids = z_centroids
@@ -90,6 +92,8 @@ class RLBot:
             set_data=set_data,
             encoder=self.encoder,
             world_model=world_model,
+            board_evaluator=board_evaluator,
+            use_neural_eval=bool(board_evaluator is not None),
             beam_width=8,
             device=self.device,
         )

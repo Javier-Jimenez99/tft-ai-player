@@ -183,14 +183,14 @@ def test_tft_state_encoder_and_gym_env() -> None:
     env = TFTEnv(set_data=set_data, alpha=0.0, beta=0.3)
 
     obs, info = env.reset(seed=42)
-    assert obs.shape == (704,)
+    assert obs.shape == (768,)
     assert "action_mask" in info
     assert info["action_mask"].shape == (TOTAL_DISCRETE_ACTIONS,)
     assert info["action_mask"][0] == True  # PASS_ROUND is legal
 
     # Execute action 0 (PASS_ROUND)
     next_obs, reward, terminated, truncated, next_info = env.step(0)
-    assert next_obs.shape == (704,)
+    assert next_obs.shape == (768,)
     assert isinstance(reward, float)
 
 

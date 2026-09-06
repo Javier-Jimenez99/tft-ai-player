@@ -1,0 +1,45 @@
+[Unit]
+Description=TFT AI Continuous Data Collection Service (24/7)
+After=network-online.target tor.service
+Wants=network-online.target
+# Disable rate limiting on restarts so systemd never gives up restarting on reboot or failures
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=javi
+Group=javi
+WorkingDirectory=/home/javi/tft-ai-player
+
+# Load environment variables (such as RIOT_API_KEY) from .env securely
+EnvironmentFile=-/home/javi/tft-ai-player/.env
+Environment=PYTHONPATH=/home/javi/tft-ai-player/src
+Environment=PYTHONUNBUFFERED=1
+
+# Run using the Pi virtual environment and Tor proxy rotation
+ExecStart=/home/javi/tft-venv/bin/python -m tft_ai_player daemon \
+    --output-dir /home/javi/tft-ai-player/data \
+    --db-path /home/javi/tft-ai-player/data/collector.db \
+    --status-file /home/javi/tft-ai-player/data/status.json \
+    --request-interval 1.2 \
+    --min-disk-free-gb 2.0 \
+    --proxy socks5://127.0.0.1:9050 \
+    --tor-control-port 9051
+
+# Always restart if stopped, killed, crashed, or after network outage
+Restart=always
+RestartSec=10
+
+# Give process 30s to flush SQLite WAL buffers cleanly on system shutdown/reboot
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Process resource limits for Raspberry Pi safety
+LimitNOFILE=65536
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tft-collector
+
+[Install]
+WantedBy=multi-user.target

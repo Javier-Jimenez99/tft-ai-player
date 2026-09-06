@@ -55,6 +55,7 @@ class TFTStateEncoder:
                 num_champs=len(self.vocab) + 10,
                 num_items=len(self.item_vocab) + 10,
                 num_traits=len(self.trait_vocab) + 10,
+                fused_dim=384,
             )
             self.trunk.eval()
         else:
@@ -275,7 +276,7 @@ class TFTEnv(gym.Env):
         self.observation_space = spaces.Box(
             low=-100.0,
             high=100.0,
-            shape=(704,),
+            shape=(768,),
             dtype=np.float32,
         )
 
