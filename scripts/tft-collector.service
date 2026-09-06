@@ -21,6 +21,7 @@ ExecStart=/home/javi/tft-venv/bin/python -m tft_ai_player daemon \
     --output-dir /home/javi/tft-ai-player/data \
     --db-path /home/javi/tft-ai-player/data/collector.db \
     --status-file /home/javi/tft-ai-player/data/status.json \
+    --api-port 8080 \
     --request-interval 1.2 \
     --min-disk-free-gb 2.0 \
     --proxy socks5://127.0.0.1:9050 \

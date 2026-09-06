@@ -300,3 +300,48 @@ def test_scheduler_falls_back_when_starved_tier_has_no_candidates() -> None:
                 assert recent[0]["tier"] == "DIAMOND"
         finally:
             service.db.close()
+
+
+def test_collector_embedded_api() -> None:
+    import urllib.request
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        db_path = Path(tmp_dir) / "api.db"
+        out_dir = Path(tmp_dir) / "data"
+        status_path = Path(tmp_dir) / "status.json"
+
+        # Use an ephemeral port by binding to 0
+        service = ContinuousCollectorService(
+            db_path=db_path,
+            output_dir=out_dir,
+            status_file=status_path,
+            api_host="127.0.0.1",
+            api_port=0,
+        )
+        service.start_api_server()
+        assert service._http_server is not None
+        port = service._http_server.server_port
+        try:
+            # 1. Health check
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health") as resp:
+                assert resp.status == 200
+                data = json.loads(resp.read().decode("utf-8"))
+                assert data["status"] == "healthy"
+                assert "frontend" in data
+
+            # 2. Status check
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status") as resp:
+                assert resp.status == 200
+                data = json.loads(resp.read().decode("utf-8"))
+                assert data["service"] == "tft-ai-collector"
+                assert "distribution" in data
+                assert "system" in data
+
+            # 3. Root redirect/JSON check
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/", headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req) as resp:
+                assert resp.status == 200
+                data = json.loads(resp.read().decode("utf-8"))
+                assert "frontend_portal" in data
+        finally:
+            service.stop_api_server()
+            service.db.close()

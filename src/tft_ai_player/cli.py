@@ -1537,6 +1537,17 @@ def _build_parser() -> argparse.ArgumentParser:
         default=3600.0,
         help="interval in seconds to export SQLite state to data/graph/*.csv for backward compatibility (default: 3600)",
     )
+    daemon_parser.add_argument(
+        "--api-port",
+        type=int,
+        default=None,
+        help="optional port to run the lightweight REST API on (e.g. 8080)",
+    )
+    daemon_parser.add_argument(
+        "--api-host",
+        default="0.0.0.0",
+        help="host interface for the REST API (default: 0.0.0.0)",
+    )
 
     monitor_parser = subcommands.add_parser(
         "monitor",
@@ -1645,6 +1656,8 @@ def _run_daemon(args: argparse.Namespace) -> int:
         riot_api_key=args.riot_api_key,
         min_disk_free_gb=args.min_disk_free_gb,
         export_csv_interval=args.export_csv_interval,
+        api_port=args.api_port,
+        api_host=args.api_host,
     )
     service.run_forever()
     return 0

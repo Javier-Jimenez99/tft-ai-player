@@ -104,10 +104,12 @@ def test_dashboard_http_server(temp_monitor_env):
 
     try:
         # Test GET /
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/") as resp:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/", headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req) as resp:
             assert resp.status == 200
-            content = resp.read().decode("utf-8")
-            assert "TFT Dashboard" in content
+            data = json.loads(resp.read().decode("utf-8"))
+            assert "frontend_portal" in data
+            assert data["status"] == "online"
 
         # Test GET /api/status
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status") as resp:

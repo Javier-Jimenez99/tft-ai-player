@@ -63,7 +63,7 @@
           <span>🔬</span> Auditoría de Modelos
         </button>
         <button id="nav-raspberry" onclick="switchNavTab('raspberry')" class="px-3.5 py-1.5 rounded-lg font-semibold transition-all text-slate-400 hover:text-white hover:bg-slate-800/60 flex items-center gap-1.5">
-          <span>🍓</span> Raspberry Pi (14k+)
+          <span>🍓</span> Telemetría Colector (API)
         </button>
         <button id="nav-arch" onclick="switchNavTab('arch')" class="px-3.5 py-1.5 rounded-lg font-semibold transition-all text-slate-400 hover:text-white hover:bg-slate-800/60 flex items-center gap-1.5">
           <span>🏛️</span> Arquitectura
@@ -531,13 +531,13 @@
         </div>
         <div>
           <div class="flex items-center gap-2">
-            <h2 class="text-lg font-bold text-white">Raspberry Pi 24/7 Dataset Collector</h2>
+            <h2 class="text-lg font-bold text-white">Telemetría del Colector 24/7 (API Backend)</h2>
             <span id="rpi-service-badge" class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-indicator"></span>
-              En Ejecución Activa
+              API Backend Activa (Puerto 8080)
             </span>
           </div>
-          <p class="text-xs text-slate-400">Pipeline continuo de ingesta oficial de partidas desde la API de Riot Games</p>
+          <p class="text-xs text-slate-400">Consumiendo en tiempo real la API REST expuesta directamente por el daemon de la Raspberry Pi</p>
         </div>
       </div>
 
@@ -664,10 +664,10 @@
         
         <!-- Step 1 -->
         <div class="bg-[#080c14] border border-slate-800 rounded-xl p-5 relative">
-          <div class="text-xs font-bold font-mono text-sky-400 uppercase mb-1">Fase 1 • Ingesta Continua</div>
-          <h3 class="text-base font-bold text-white mb-2">Raspberry Pi 24/7 Collector</h3>
+          <div class="text-xs font-bold font-mono text-sky-400 uppercase mb-1">Fase 1 • Colector Headless + API</div>
+          <h3 class="text-base font-bold text-white mb-2">Raspberry Pi 24/7 (Sin Web Local)</h3>
           <p class="text-xs text-slate-300 leading-relaxed">
-            Un servicio ultra-ligero en Raspberry Pi consulta la API oficial de Riot Games y Metatft para descargar miles de repeticiones de partidas de Challenger a Hierro, indexándolas en SQLite y particionándolas por liga.
+            Un único servicio daemon corre 24/7 en la Raspberry Pi descargando partidas e indexándolas en SQLite. <strong>No alberga ningún frontend HTML local</strong>: únicamente levanta una micro-API REST en el puerto 8080 (<code class="text-sky-300 text-[11px]">/api/status</code>, <code class="text-sky-300 text-[11px]">/api/recent</code>) que este portal en GitHub Pages consume en tiempo real.
           </p>
         </div>
 

@@ -147,6 +147,13 @@ class DashboardHttpHandler(BaseHTTPRequestHandler):
         else:
             self.send_error(404, "Not Found")
 
+    def do_OPTIONS(self) -> None:
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "*")
+        self.end_headers()
+
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
@@ -159,23 +166,25 @@ class DashboardHttpHandler(BaseHTTPRequestHandler):
             self._serve_recent(parsed.query)
         elif path == "/api/analytics":
             self._serve_analytics()
+        elif path == "/api/health":
+            self._send_json(200, {"status": "healthy", "service": "tft-ai-collector", "frontend": "https://javier-jimenez99.github.io/tft-ai-player/"})
         else:
-            self.send_error(404, "Not Found")
+            self._send_json(404, {"error": "Not Found", "frontend": "https://javier-jimenez99.github.io/tft-ai-player/"})
 
     def _serve_html(self) -> None:
-        if not self.dashboard_html_path.exists():
-            self.send_error(500, f"Dashboard template not found at {self.dashboard_html_path}")
-            return
-
-        try:
-            content = self.dashboard_html_path.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(content)))
+        accept = self.headers.get("Accept", "")
+        if "text/html" in accept or "*/*" in accept:
+            self.send_response(302)
+            self.send_header("Location", "https://javier-jimenez99.github.io/tft-ai-player/")
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            self.wfile.write(content)
-        except Exception as e:
-            self.send_error(500, f"Error reading dashboard: {e}")
+        else:
+            self._send_json(200, {
+                "service": "tft-ai-collector",
+                "status": "online",
+                "frontend_portal": "https://javier-jimenez99.github.io/tft-ai-player/",
+                "endpoints": ["/api/status", "/api/recent", "/api/analytics", "/api/health"],
+            })
 
     def _serve_status(self) -> None:
         status_data: dict[str, Any] = {}

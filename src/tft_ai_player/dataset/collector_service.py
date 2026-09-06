@@ -17,9 +17,12 @@ import os
 import shutil
 import signal
 import sys
+import threading
 import time
+import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -31,6 +34,65 @@ from .timeline import TimelineValidationError, extract_pvp_rounds
 from ..metatft.client import MetaTftClient, MetaTftRequestError
 
 logger = logging.getLogger(__name__)
+
+
+def get_raspberry_pi_temperature() -> float | None:
+    """Read CPU temperature from Raspberry Pi Linux sysfs thermal sensor."""
+    thermal_path = Path("/sys/class/thermal/thermal_zone0/temp")
+    if thermal_path.exists():
+        try:
+            val = thermal_path.read_text().strip()
+            return round(int(val) / 1000.0, 1)
+        except Exception:
+            return None
+    return None
+
+
+def get_system_hardware_stats(output_dir: Path) -> dict[str, Any]:
+    """Collect lightweight system metrics (disk, CPU temp, RAM)."""
+    stats: dict[str, Any] = {
+        "cpu_temp_c": get_raspberry_pi_temperature(),
+        "cpu_percent": 0.0,
+        "ram_percent": 0.0,
+        "free_disk_gb": 0.0,
+        "total_disk_gb": 0.0,
+    }
+
+    # MicroSD Disk stats
+    try:
+        usage = shutil.disk_usage(output_dir)
+        stats["free_disk_gb"] = round(usage.free / (1024**3), 2)
+        stats["total_disk_gb"] = round(usage.total / (1024**3), 2)
+    except Exception:
+        pass
+
+    # Linux /proc/meminfo
+    meminfo_path = Path("/proc/meminfo")
+    if meminfo_path.exists():
+        try:
+            mem: dict[str, int] = {}
+            for line in meminfo_path.read_text().splitlines():
+                parts = line.split(":")
+                if len(parts) == 2:
+                    k = parts[0].strip()
+                    val_str = parts[1].strip().split()[0]
+                    if val_str.isdigit():
+                        mem[k] = int(val_str)
+            if "MemTotal" in mem and "MemAvailable" in mem and mem["MemTotal"] > 0:
+                used = mem["MemTotal"] - mem["MemAvailable"]
+                stats["ram_percent"] = round((used / mem["MemTotal"]) * 100, 1)
+        except Exception:
+            pass
+
+    # Linux load average
+    try:
+        load1, _, _ = os.getloadavg()
+        cpu_count = os.cpu_count() or 1
+        stats["cpu_percent"] = round(min(100.0, (load1 / cpu_count) * 100), 1)
+    except Exception:
+        pass
+
+    return stats
 
 # Default distribution: ~45% High-Elo, ~35% Mid-Elo, ~20% Low-Elo
 DEFAULT_TARGET_WEIGHTS: dict[str, float] = {
@@ -75,6 +137,86 @@ class CollectorStats:
     rate_limited_until: float = 0.0
 
 
+class CollectorApiHandler(BaseHTTPRequestHandler):
+    """Lightweight REST API handler for the collector daemon.
+
+    Zero frontend HTML: redirects browser root to GitHub Pages portal.
+    """
+
+    service: Any
+
+    def log_message(self, format: str, *args: Any) -> None:
+        logger.debug("API HTTP %s - " + format, self.address_string(), *args)
+
+    def _send_json(self, status_code: int, data: Any) -> None:
+        payload = json.dumps(data, indent=2).encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "*")
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_OPTIONS(self) -> None:
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "*")
+        self.end_headers()
+
+    def do_GET(self) -> None:
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        if path in ("/", "/index.html"):
+            accept = self.headers.get("Accept", "")
+            if "text/html" in accept or "*/*" in accept:
+                self.send_response(302)
+                self.send_header("Location", "https://javier-jimenez99.github.io/tft-ai-player/")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+            else:
+                self._send_json(200, {
+                    "service": "tft-ai-collector",
+                    "status": "online",
+                    "frontend_portal": "https://javier-jimenez99.github.io/tft-ai-player/",
+                    "endpoints": ["/api/status", "/api/recent", "/api/analytics", "/api/health"],
+                })
+        elif path == "/api/status":
+            self._send_json(200, self.service.get_status_dict())
+        elif path == "/api/recent":
+            params = urllib.parse.parse_qs(parsed.query)
+            limit = 30
+            if "limit" in params and params["limit"][0].isdigit():
+                limit = max(1, min(100, int(params["limit"][0])))
+            try:
+                matches = self.service.db.get_recent_downloaded_matches(limit=limit)
+                self._send_json(200, {"matches": matches})
+            except Exception as e:
+                self._send_json(500, {"error": str(e), "matches": []})
+        elif path == "/api/analytics":
+            try:
+                analytics = self.service.db.get_analytics_summary()
+                self._send_json(200, analytics)
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+        elif path == "/api/health":
+            self._send_json(200, {
+                "status": "healthy",
+                "service": "tft-ai-collector",
+                "uptime_hours": round((time.time() - self.service.stats.started_at) / 3600.0, 2),
+                "frontend": "https://javier-jimenez99.github.io/tft-ai-player/",
+            })
+        else:
+            self._send_json(404, {
+                "error": "Not Found",
+                "available_endpoints": ["/api/status", "/api/recent", "/api/analytics", "/api/health"],
+                "frontend": "https://javier-jimenez99.github.io/tft-ai-player/",
+            })
+
+
 class ContinuousCollectorService:
     """Autonomous 24/7 service managing continuous collection without ELO starvation."""
 
@@ -93,6 +235,8 @@ class ContinuousCollectorService:
         riot_api_key: str | None = None,
         min_disk_free_gb: float = 2.0,
         export_csv_interval: float = 3600.0,
+        api_port: int | None = None,
+        api_host: str = "0.0.0.0",
     ) -> None:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -107,6 +251,12 @@ class ContinuousCollectorService:
         self._last_csv_export_at = time.time()
         self._last_status_write_at = 0.0
         self._last_leaderboard_fetch_at = 0.0
+
+        # API server configuration
+        self.api_port = api_port
+        self.api_host = api_host
+        self._http_server: ThreadingHTTPServer | None = None
+        self._http_thread: threading.Thread | None = None
 
         # Normalize weights
         raw_weights = target_weights or DEFAULT_TARGET_WEIGHTS
@@ -133,6 +283,7 @@ class ContinuousCollectorService:
     def _handle_signal(self, signum: int, frame: Any) -> None:
         logger.info("Received termination signal %d. Shutting down gracefully...", signum)
         self._stop_requested = True
+        self.stop_api_server()
 
     def initialize_data(self) -> None:
         """Scan existing data directories and migrate legacy CSVs if necessary."""
@@ -725,11 +876,8 @@ class ContinuousCollectorService:
     # Health Monitoring & Status Reporting (Heartbeat)
     # -------------------------------------------------------------------------
 
-    def write_status_heartbeat(self) -> None:
-        """Write structured health status JSON file for external monitoring."""
-        if not self.status_file:
-            return
-
+    def get_status_dict(self) -> dict[str, Any]:
+        """Compute structured health status dictionary in-memory."""
         now = time.time()
         counts = self.db.get_tier_counts()
         downloaded = counts["downloaded"]
@@ -746,7 +894,15 @@ class ContinuousCollectorService:
         except Exception:
             free_gb = 0.0
 
-        status_data = {
+        remote_url = None
+        tunnel_file = self.output_dir / "tunnel_url.txt"
+        if tunnel_file.exists():
+            try:
+                remote_url = tunnel_file.read_text(encoding="utf-8").strip()
+            except Exception:
+                pass
+
+        return {
             "service": "tft-ai-collector",
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "uptime_seconds": round(uptime_sec, 1),
@@ -758,6 +914,8 @@ class ContinuousCollectorService:
             "download_rate_per_hour": round(dl_per_hour, 1),
             "free_disk_gb": round(free_gb, 2),
             "last_action": self.stats.last_action,
+            "remote_url": remote_url,
+            "system": get_system_hardware_stats(self.output_dir),
             "distribution": {
                 t: {
                     "downloaded": downloaded.get(t, 0),
@@ -771,14 +929,47 @@ class ContinuousCollectorService:
             "analytics": self.db.get_analytics_summary(),
         }
 
+    def write_status_heartbeat(self) -> None:
+        """Write structured health status JSON file for external monitoring."""
+        if not self.status_file:
+            return
+
+        status_data = self.get_status_dict()
         try:
             tmp_status = self.status_file.with_suffix(".tmp")
             with tmp_status.open("w", encoding="utf-8") as f:
                 json.dump(status_data, f, indent=2)
             tmp_status.replace(self.status_file)
-            self._last_status_write_at = now
+            self._last_status_write_at = time.time()
         except Exception as e:
             logger.debug("Failed to write status heartbeat: %s", e)
+
+    def start_api_server(self) -> None:
+        """Start the embedded JSON API server in a background thread."""
+        if self.api_port is None:
+            return
+        try:
+            handler_cls = type("BoundCollectorApiHandler", (CollectorApiHandler,), {"service": self})
+            self._http_server = ThreadingHTTPServer((self.api_host, self.api_port), handler_cls)
+            self._http_thread = threading.Thread(
+                target=self._http_server.serve_forever,
+                daemon=True,
+                name="tft-collector-api",
+            )
+            self._http_thread.start()
+            logger.info("Collector REST API active on http://%s:%d (Frontend at https://javier-jimenez99.github.io/tft-ai-player/)", self.api_host, self.api_port)
+        except Exception as e:
+            logger.warning("Could not start embedded API server on %s:%d: %s", self.api_host, self.api_port, e)
+
+    def stop_api_server(self) -> None:
+        """Stop embedded HTTP API server."""
+        if self._http_server:
+            try:
+                self._http_server.shutdown()
+                self._http_server.server_close()
+            except Exception:
+                pass
+            self._http_server = None
 
     # -------------------------------------------------------------------------
     # Main Daemon Loop
@@ -790,10 +981,13 @@ class ContinuousCollectorService:
         logger.info(" Starting 24/7 TFT Continuous Balanced Collection Daemon")
         logger.info(" Destination: %s", self.output_dir.resolve())
         logger.info(" Target distribution: %s", {t: f"{w*100:.0f}%" for t, w in self.target_weights.items()})
+        if self.api_port:
+            logger.info(" REST API Server: http://%s:%d (Frontend: https://javier-jimenez99.github.io/tft-ai-player/)", self.api_host, self.api_port)
         logger.info("=" * 70)
 
         self.initialize_data()
         self.write_status_heartbeat()
+        self.start_api_server()
 
         try:
             while not self._stop_requested:
@@ -819,6 +1013,7 @@ class ContinuousCollectorService:
             logger.info("KeyboardInterrupt received.")
         finally:
             logger.info("Shutting down collector service...")
+            self.stop_api_server()
             self.write_status_heartbeat()
             try:
                 self.db.export_csv_manifests(self.output_dir / "graph")
