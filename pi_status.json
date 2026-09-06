@@ -1,0 +1,179 @@
+{
+  "service": "tft-ai-collector",
+  "updated_at": "2026-09-06T14:11:59.217013+00:00",
+  "uptime_seconds": 10069.5,
+  "uptime_hours": 2.8,
+  "total_matches_on_disk": 14048,
+  "session_downloaded": 3092,
+  "session_skipped": 183,
+  "session_errors": 0,
+  "download_rate_per_hour": 1105.4,
+  "free_disk_gb": 49.51,
+  "last_action": "downloading_GRANDMASTER_a9615c6b",
+  "distribution": {
+    "CHALLENGER": {
+      "downloaded": 398,
+      "pending_games": 0,
+      "unscanned_players": 0,
+      "current_share_pct": 2.8,
+      "target_share_pct": 10.0
+    },
+    "GRANDMASTER": {
+      "downloaded": 2221,
+      "pending_games": 2349,
+      "unscanned_players": 2,
+      "current_share_pct": 15.8,
+      "target_share_pct": 15.0
+    },
+    "MASTER": {
+      "downloaded": 2940,
+      "pending_games": 9937,
+      "unscanned_players": 0,
+      "current_share_pct": 20.9,
+      "target_share_pct": 20.0
+    },
+    "DIAMOND": {
+      "downloaded": 2653,
+      "pending_games": 31645,
+      "unscanned_players": 674,
+      "current_share_pct": 18.9,
+      "target_share_pct": 18.0
+    },
+    "EMERALD": {
+      "downloaded": 2076,
+      "pending_games": 46592,
+      "unscanned_players": 1590,
+      "current_share_pct": 14.8,
+      "target_share_pct": 14.0
+    },
+    "PLATINUM": {
+      "downloaded": 1497,
+      "pending_games": 39512,
+      "unscanned_players": 1993,
+      "current_share_pct": 10.7,
+      "target_share_pct": 10.0
+    },
+    "GOLD": {
+      "downloaded": 970,
+      "pending_games": 10747,
+      "unscanned_players": 0,
+      "current_share_pct": 6.9,
+      "target_share_pct": 6.0
+    },
+    "SILVER": {
+      "downloaded": 935,
+      "pending_games": 822,
+      "unscanned_players": 0,
+      "current_share_pct": 6.7,
+      "target_share_pct": 4.0
+    },
+    "BRONZE": {
+      "downloaded": 323,
+      "pending_games": 131,
+      "unscanned_players": 0,
+      "current_share_pct": 2.3,
+      "target_share_pct": 2.0
+    },
+    "IRON": {
+      "downloaded": 34,
+      "pending_games": 0,
+      "unscanned_players": 0,
+      "current_share_pct": 0.2,
+      "target_share_pct": 1.0
+    }
+  },
+  "analytics": {
+    "total_matches": 14048,
+    "top1_count": 2546,
+    "top1_pct": 18.1,
+    "top4_count": 12697,
+    "top4_pct": 90.4,
+    "avg_elo": 2681.6,
+    "min_elo": 444,
+    "max_elo": 4921,
+    "placement_histogram": {
+      "labels": [
+        "Top 1 \ud83c\udfc6",
+        "Top 2 \ud83e\udd48",
+        "Top 3 \ud83e\udd49",
+        "Top 4 \ud83c\udf96\ufe0f",
+        "Top 5",
+        "Top 6",
+        "Top 7",
+        "Top 8"
+      ],
+      "counts": [
+        2546,
+        5646,
+        2452,
+        2053,
+        1123,
+        171,
+        28,
+        29
+      ]
+    },
+    "elo_histogram": {
+      "labels": [
+        "200-400 (Hierro)",
+        "400-600 (Hierro)",
+        "600-800 (Bronce)",
+        "800-1000 (Bronce)",
+        "1000-1200 (Plata)",
+        "1200-1400 (Plata)",
+        "1400-1600 (Oro)",
+        "1600-1800 (Oro)",
+        "1800-2000 (Platino)",
+        "2000-2200 (Platino)",
+        "2200-2400 (Esmeralda)",
+        "2400-2600 (Esmeralda)",
+        "2600-2800 (Diamante)",
+        "2800-3000 (Diamante)",
+        "3000-3200 (Master)",
+        "3200-3400 (Master)",
+        "3400-3600 (Master)",
+        "3600-3800 (GM)",
+        "3800-4000 (GM)",
+        "4000-4200 (GM)",
+        "4200-4400 (Challenger)",
+        "4400-4600 (Challenger)",
+        "4600-4800 (Challenger)",
+        "4800-5000 (Challenger)"
+      ],
+      "counts": [
+        0,
+        34,
+        91,
+        232,
+        346,
+        589,
+        245,
+        725,
+        553,
+        944,
+        1002,
+        1074,
+        1156,
+        1497,
+        2763,
+        177,
+        0,
+        1260,
+        849,
+        112,
+        327,
+        0,
+        58,
+        13
+      ]
+    }
+  },
+  "remote_url": "https://without-fly-privileges-lots.trycloudflare.com",
+  "system": {
+    "cpu_temp_c": 76.4,
+    "cpu_percent": 7.6,
+    "ram_percent": 5.7,
+    "free_disk_gb": 49.51,
+    "total_disk_gb": 58.02
+  }
+}
